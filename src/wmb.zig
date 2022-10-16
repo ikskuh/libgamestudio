@@ -1,51 +1,15 @@
 const std = @import("std");
 const logger = std.log.scoped(.wmb);
+const util = @import("util.zig");
+const lib = @import("main.zig");
 
-fn readFloat(reader: anytype) !f32 {
-    return @bitCast(f32, try reader.readIntLittle(u32));
-}
-
-fn readVec3(reader: anytype) !Vector3 {
-    return Vector3{
-        .x = try readFloat(reader),
-        .y = try readFloat(reader),
-        .z = try readFloat(reader),
-    };
-}
-
-fn readEuler(reader: anytype) !Euler {
-    return Euler{
-        .pan = try readFloat(reader),
-        .tilt = try readFloat(reader),
-        .roll = try readFloat(reader),
-    };
-}
-
-pub const CoordinateSystem = enum {
-    /// identity
-    keep,
-
-    /// X=forward, Y=left, Z=up
-    gamestudio,
-
-    /// X=right, Y=up, Z=back
-    opengl,
-
-    pub fn fromGamestudio(cs: CoordinateSystem, vec: Vector3) Vector3 {
-        return switch (cs) {
-            .keep => vec,
-            .gamestudio => vec,
-            .opengl => Vector3{
-                .x = -vec.y, // right
-                .y = vec.z, // up
-                .z = -vec.x, // back
-            },
-        };
-    }
-};
+const Vector3 = lib.Vector3;
+const Euler = lib.Euler;
+const Color = lib.Color;
+const String = lib.String;
 
 pub const LoadOptions = struct {
-    target_coordinate_system: CoordinateSystem = .keep,
+    target_coordinate_system: lib.CoordinateSystem = .keep,
     scale: f32 = 1.0,
 
     pub fn transformVec(options: LoadOptions, in: Vector3) Vector3 {
@@ -243,8 +207,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     //   char  name[20];
                     // } WMB_POSITION;
                     var pos = Position{
-                        .origin = options.transformVec(try readVec3(reader)),
-                        .angle = try readEuler(reader),
+                        .origin = options.transformVec(try util.readVec3(reader)),
+                        .angle = try util.readEuler(reader),
                     };
                     _ = try reader.readIntLittle(u32);
                     _ = try reader.readIntLittle(u32);
@@ -263,9 +227,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     // } WMB_LIGHT;
 
                     var light = Light{
-                        .origin = options.transformVec(try readVec3(reader)),
-                        .color = Color.fromVec3(try readVec3(reader)),
-                        .range = try readFloat(reader),
+                        .origin = options.transformVec(try util.readVec3(reader)),
+                        .color = Color.fromVec3(try util.readVec3(reader)),
+                        .range = try util.readFloat(reader),
                         .flags = undefined,
                     };
 
@@ -295,9 +259,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                     var ent = Entity{
                         .is_old_data = true,
-                        .origin = options.transformVec(try readVec3(reader)),
-                        .angle = try readEuler(reader),
-                        .scale = options.transformVec(try readVec3(reader)).abs(),
+                        .origin = options.transformVec(try util.readVec3(reader)),
+                        .angle = try util.readEuler(reader),
+                        .scale = options.transformVec(try util.readVec3(reader)).abs(),
                     };
 
                     try reader.readNoEof(ent.name.chars[0..20]); // smaller than the actual one!
@@ -309,7 +273,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     const flags = try reader.readIntLittle(u32);
                     ent.flags = Entity.Flags.fromInt(flags);
 
-                    ent.ambient = try readFloat(reader);
+                    ent.ambient = try util.readFloat(reader);
 
                     break :blk .{ .entity = ent };
                 },
@@ -325,8 +289,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     // } WMB_SOUND;
 
                     var sound = Sound{
-                        .origin = options.transformVec(try readVec3(reader)),
-                        .volume = try readFloat(reader),
+                        .origin = options.transformVec(try util.readVec3(reader)),
+                        .volume = try util.readFloat(reader),
                         .range = undefined,
                         .flags = Sound.Flags{},
                         .file_name = undefined,
@@ -372,8 +336,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         .fog_colors = undefined,
                     };
 
-                    info.azimuth = try readFloat(reader);
-                    info.elevation = try readFloat(reader);
+                    info.azimuth = try util.readFloat(reader);
+                    info.elevation = try util.readFloat(reader);
 
                     _ = try reader.readIntLittle(u32); // flags
                     _ = try reader.readIntLittle(u32); // version
@@ -416,7 +380,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                     try reader.readNoEof(path.name.chars[0..20]);
 
-                    const num_points = @floatToInt(u32, try readFloat(reader));
+                    const num_points = @floatToInt(u32, try util.readFloat(reader));
                     _ = try reader.readIntLittle(u32);
                     _ = try reader.readIntLittle(u32);
                     _ = try reader.readIntLittle(u32);
@@ -426,7 +390,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                     for (path.points) |*pt| {
                         pt.* = Path.Point{
-                            .position = options.transformVec(try readVec3(reader)),
+                            .position = options.transformVec(try util.readVec3(reader)),
                         };
                     }
 
@@ -447,8 +411,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         //   float fSkill;
                         // } PATH_EDGE;
 
-                        const node1 = try readFloat(reader);
-                        const node2 = try readFloat(reader);
+                        const node1 = try util.readFloat(reader);
+                        const node2 = try util.readFloat(reader);
 
                         if (node1 < 1 or node2 < 1) {
                             logger.warn("invalid path node: {d} -> {d}", .{ node1, node2 });
@@ -463,10 +427,10 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         const edge = Path.Edge{
                             .node1 = @floatToInt(u32, node1) - 1,
                             .node2 = @floatToInt(u32, node2) - 1,
-                            .length = try readFloat(reader),
-                            .bezier = try readFloat(reader),
-                            .weight = try readFloat(reader),
-                            .skill = try readFloat(reader),
+                            .length = try util.readFloat(reader),
+                            .bezier = try util.readFloat(reader),
+                            .weight = try util.readFloat(reader),
+                            .skill = try util.readFloat(reader),
                         };
                         edges.appendAssumeCapacity(edge);
                     }
@@ -498,9 +462,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                     var entity = Entity{
                         .is_old_data = false,
-                        .origin = options.transformVec(try readVec3(reader)),
-                        .angle = try readEuler(reader),
-                        .scale = options.transformVec(try readVec3(reader)).abs(),
+                        .origin = options.transformVec(try util.readVec3(reader)),
+                        .angle = try util.readEuler(reader),
+                        .scale = options.transformVec(try util.readVec3(reader)).abs(),
                     };
                     try reader.readNoEof(entity.name.chars[0..33]);
                     try reader.readNoEof(entity.file_name.chars[0..33]);
@@ -511,8 +475,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     const flags = try reader.readIntLittle(u32);
                     entity.flags = Entity.Flags.fromInt(flags);
 
-                    entity.ambient = try readFloat(reader);
-                    entity.albedo = try readFloat(reader);
+                    entity.ambient = try util.readFloat(reader);
+                    entity.albedo = try util.readFloat(reader);
 
                     const path_index = try reader.readIntLittle(u32);
                     const entity2_index = try reader.readIntLittle(u32);
@@ -545,8 +509,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     // };
 
                     var region = Region{
-                        .minimum = options.transformVec(try readVec3(reader)),
-                        .maximum = options.transformVec(try readVec3(reader)),
+                        .minimum = options.transformVec(try util.readVec3(reader)),
+                        .maximum = options.transformVec(try util.readVec3(reader)),
                     };
                     _ = try reader.readIntLittle(u32);
                     _ = try reader.readIntLittle(u32);
@@ -590,8 +554,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 .skins = undefined,
             };
 
-            block.bb_min = options.transformVec(try readVec3(reader));
-            block.bb_max = options.transformVec(try readVec3(reader));
+            block.bb_min = options.transformVec(try util.readVec3(reader));
+            block.bb_max = options.transformVec(try util.readVec3(reader));
 
             _ = try reader.readIntLittle(u32);
 
@@ -651,8 +615,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     .texture = try reader.readIntLittle(u16),
                     .lightmap = try reader.readIntLittle(u16),
                     .material = try reader.readIntLittle(u32),
-                    .ambient = try readFloat(reader),
-                    .albedo = try readFloat(reader),
+                    .ambient = try util.readFloat(reader),
+                    .albedo = try util.readFloat(reader),
                     .flags = undefined,
                 };
                 const flags = try reader.readIntLittle(u32);
@@ -1141,97 +1105,3 @@ pub const Vector2 = extern struct {
         try writer.print("({d:.3}, {d:.3})", .{ vec.x, vec.y });
     }
 };
-pub const Vector3 = extern struct {
-    x: f32,
-    y: f32,
-    z: f32,
-
-    pub fn abs(vec: Vector3) Vector3 {
-        return Vector3{
-            .x = @fabs(vec.x),
-            .y = @fabs(vec.y),
-            .z = @fabs(vec.z),
-        };
-    }
-
-    pub fn format(vec: Vector3, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("({d:.3}, {d:.3}, {d:.3})", .{ vec.x, vec.y, vec.z });
-    }
-};
-
-pub const Euler = extern struct {
-    pan: f32,
-    tilt: f32,
-    roll: f32,
-
-    pub fn format(vec: Euler, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("({d:3.0}, {d:3.0}, {d:3.0})", .{ vec.pan, vec.tilt, vec.roll });
-    }
-};
-
-pub const Color = extern struct {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32 = 1.0,
-
-    pub fn format(vec: Color, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("#{X:0>2}{X:0>2}{X:0>2}{X:0>2}", .{
-            @floatToInt(u8, std.math.clamp(255.0 * vec.r, 0, 255)),
-            @floatToInt(u8, std.math.clamp(255.0 * vec.g, 0, 255)),
-            @floatToInt(u8, std.math.clamp(255.0 * vec.b, 0, 255)),
-            @floatToInt(u8, std.math.clamp(255.0 * vec.a, 0, 255)),
-        });
-    }
-
-    pub fn fromVec3(val: Vector3) Color {
-        return Color{
-            .r = std.math.clamp(val.x / 100.0, 0, 100),
-            .g = std.math.clamp(val.y / 100.0, 0, 100),
-            .b = std.math.clamp(val.z / 100.0, 0, 100),
-        };
-    }
-
-    pub fn fromDWORD(val: u32) Color {
-        var bytes: [4]u8 = undefined;
-        std.mem.writeIntLittle(u32, &bytes, val);
-
-        return Color{
-            .r = @intToFloat(f32, bytes[0]) / 255.0,
-            .g = @intToFloat(f32, bytes[1]) / 255.0,
-            .b = @intToFloat(f32, bytes[2]) / 255.0,
-            .a = @intToFloat(f32, bytes[3]) / 255.0,
-        };
-    }
-};
-
-pub fn String(comptime N: comptime_int) type {
-    return extern struct {
-        const Str = @This();
-
-        chars: [N]u8 = std.mem.zeroes([N]u8),
-
-        pub fn len(str: Str) usize {
-            return std.mem.indexOfScalar(u8, &str.chars, 0) orelse N;
-        }
-
-        pub fn get(str: *const Str) []const u8 {
-            return str.chars[0..str.len()];
-        }
-
-        pub fn format(str: Str, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = fmt;
-            try std.fmt.formatText(str.get(), "S", options, writer);
-        }
-
-        comptime {
-            std.debug.assert(@sizeOf(@This()) == N);
-        }
-    };
-}
