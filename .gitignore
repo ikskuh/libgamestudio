@@ -1,0 +1,7 @@
+*.raw
+*.bak
+*.$$M
+*.$$w
+*.wed
+zig-out/
+zig-cache/
