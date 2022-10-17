@@ -4,6 +4,7 @@ const util = @import("util.zig");
 const lib = @import("main.zig");
 
 const Vector3 = lib.Vector3;
+const Vector2 = lib.Vector2;
 const Euler = lib.Euler;
 const Color = lib.Color;
 const String = lib.String;
@@ -1093,15 +1094,4 @@ const bits = struct {
         legacy8: LIST, // WMB1..6 only
         lightmaps_terrain: LIST, // lightmaps for terrains
     };
-};
-
-pub const Vector2 = extern struct {
-    x: f32,
-    y: f32,
-
-    pub fn format(vec: Vector2, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("({d:.3}, {d:.3})", .{ vec.x, vec.y });
-    }
 };

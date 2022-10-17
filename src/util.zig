@@ -25,3 +25,9 @@ pub fn readEuler(reader: anytype) !Euler {
         .roll = try readFloat(reader),
     };
 }
+
+pub fn writeVec3(writer: anytype, vec: Vector3) !void {
+    try writer.writeIntLittle(u32, @bitCast(u32, vec.x));
+    try writer.writeIntLittle(u32, @bitCast(u32, vec.y));
+    try writer.writeIntLittle(u32, @bitCast(u32, vec.z));
+}

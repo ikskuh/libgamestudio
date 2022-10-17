@@ -1,9 +1,11 @@
 const std = @import("std");
 
 pub const wmb = @import("wmb.zig");
+pub const mdl = @import("mdl.zig");
 
 comptime {
     _ = wmb;
+    _ = mdl;
 }
 
 pub const CoordinateSystem = enum {
@@ -29,6 +31,17 @@ pub const CoordinateSystem = enum {
     }
 };
 
+pub const Vector2 = extern struct {
+    x: f32,
+    y: f32,
+
+    pub fn format(vec: Vector2, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("({d:.3}, {d:.3})", .{ vec.x, vec.y });
+    }
+};
+
 pub const Vector3 = extern struct {
     x: f32,
     y: f32,
@@ -40,6 +53,10 @@ pub const Vector3 = extern struct {
             .y = @fabs(vec.y),
             .z = @fabs(vec.z),
         };
+    }
+
+    pub fn fromArray(vec: [3]f32) Vector3 {
+        return @bitCast(Vector3, vec);
     }
 
     pub fn format(vec: Vector3, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {

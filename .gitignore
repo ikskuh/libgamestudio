@@ -5,3 +5,4 @@
 *.wed
 zig-out/
 zig-cache/
+*.stl
