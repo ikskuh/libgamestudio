@@ -14,11 +14,26 @@ pub const LoadOptions = struct {
     scale: f32 = 1.0,
 
     pub fn transformVec(options: LoadOptions, in: Vector3) Vector3 {
-        var intermediate = options.target_coordinate_system.fromGamestudio(in);
+        var intermediate = options.target_coordinate_system.vecFromGamestudio(in);
         intermediate.x *= options.scale;
         intermediate.y *= options.scale;
         intermediate.z *= options.scale;
         return intermediate;
+    }
+
+    /// Transforms an object scale according to our configuration.
+    /// This will apply the global scale as well, as objects in a level
+    /// will need to be loaded "smaller" than they actually are.
+    pub fn transformScale(options: LoadOptions, in: Vector3) Vector3 {
+        var intermediate = options.target_coordinate_system.scaleFromGamestudio(in);
+        intermediate.x *= options.scale;
+        intermediate.y *= options.scale;
+        intermediate.z *= options.scale;
+        return intermediate;
+    }
+
+    pub fn transformAng(options: LoadOptions, in: Euler) Euler {
+        return options.target_coordinate_system.angFromGamestudio(in);
     }
 };
 
@@ -106,17 +121,24 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
             const tex_type = try reader.readIntLittle(u32);
             tex.has_mipmaps = (tex_type & 8) != 0;
-            tex.format = std.meta.intToEnum(Texture.Format, tex_type & ~@as(u32, 8)) catch return error.InvalidTexture;
+            tex.format = switch (tex_type & ~@as(u32, 8)) {
+                5 => lib.TextureFormat.rgba8888,
+                4 => lib.TextureFormat.rgb888,
+                2 => lib.TextureFormat.rgb565,
+                6 => lib.TextureFormat.dds,
+                else => return error.InvalidTexture,
+            };
 
             _ = try reader.readIntLittle(u32);
             _ = try reader.readIntLittle(u32);
             _ = try reader.readIntLittle(u32);
 
             const data_size: usize = switch (tex.format) {
-                .rgba_8888 => 4 * @as(usize, tex.width) * tex.height,
-                .rgb_888 => 3 * @as(usize, tex.width) * tex.height,
-                .rgb_565 => 2 * @as(usize, tex.width) * tex.height,
+                .rgba8888 => 4 * @as(usize, tex.width) * tex.height,
+                .rgb888 => 3 * @as(usize, tex.width) * tex.height,
+                .rgb565 => 2 * @as(usize, tex.width) * tex.height,
                 .dds => tex.width,
+                .pal256, .rgb4444 => unreachable,
             };
 
             tex.data = try arena.alloc(u8, data_size);
@@ -209,7 +231,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     // } WMB_POSITION;
                     var pos = Position{
                         .origin = options.transformVec(try util.readVec3(reader)),
-                        .angle = try util.readEuler(reader),
+                        .angle = options.transformAng(try util.readEuler(reader)),
                     };
                     _ = try reader.readIntLittle(u32);
                     _ = try reader.readIntLittle(u32);
@@ -261,8 +283,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     var ent = Entity{
                         .is_old_data = true,
                         .origin = options.transformVec(try util.readVec3(reader)),
-                        .angle = try util.readEuler(reader),
-                        .scale = options.transformVec(try util.readVec3(reader)).abs(),
+                        .angle = options.transformAng(try util.readEuler(reader)),
+                        .scale = options.transformScale(try util.readVec3(reader)),
                     };
 
                     try reader.readNoEof(ent.name.chars[0..20]); // smaller than the actual one!
@@ -464,8 +486,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     var entity = Entity{
                         .is_old_data = false,
                         .origin = options.transformVec(try util.readVec3(reader)),
-                        .angle = try util.readEuler(reader),
-                        .scale = options.transformVec(try util.readVec3(reader)).abs(),
+                        .angle = options.transformAng(try util.readEuler(reader)),
+                        .scale = options.transformScale(try util.readVec3(reader)),
                     };
                     try reader.readNoEof(entity.name.chars[0..33]);
                     try reader.readNoEof(entity.file_name.chars[0..33]);
@@ -1024,17 +1046,10 @@ pub const Texture = struct {
     name: String(16) = .{},
     width: u32,
     height: u32,
-    format: Format,
+    format: lib.TextureFormat,
     has_mipmaps: bool,
 
     data: []u8,
-
-    pub const Format = enum(u32) {
-        rgba_8888 = 5,
-        rgb_888 = 4,
-        rgb_565 = 2,
-        dds = 6,
-    };
 };
 
 pub const Material = struct {

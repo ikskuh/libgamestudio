@@ -18,14 +18,34 @@ pub const CoordinateSystem = enum {
     /// X=right, Y=up, Z=back
     opengl,
 
-    pub fn fromGamestudio(cs: CoordinateSystem, vec: Vector3) Vector3 {
+    pub fn vecFromGamestudio(cs: CoordinateSystem, vec: Vector3) Vector3 {
         return switch (cs) {
             .keep => vec,
             .gamestudio => vec,
             .opengl => Vector3{
-                .x = -vec.y, // right
+                .x = vec.y, // right
                 .y = vec.z, // up
                 .z = -vec.x, // back
+            },
+        };
+    }
+
+    pub fn scaleFromGamestudio(cs: CoordinateSystem, vec: Vector3) Vector3 {
+        return switch (cs) {
+            .keep => vec,
+            .gamestudio => vec,
+            .opengl => Vector3{ .x = vec.y, .y = vec.z, .z = vec.x },
+        };
+    }
+
+    pub fn angFromGamestudio(cs: CoordinateSystem, ang: Euler) Euler {
+        return switch (cs) {
+            .keep => ang,
+            .gamestudio => ang,
+            .opengl => Euler{
+                .pan = ang.pan,
+                .tilt = ang.tilt,
+                .roll = -ang.roll,
             },
         };
     }
@@ -47,13 +67,13 @@ pub const Vector3 = extern struct {
     y: f32,
     z: f32,
 
-    pub fn abs(vec: Vector3) Vector3 {
-        return Vector3{
-            .x = @fabs(vec.x),
-            .y = @fabs(vec.y),
-            .z = @fabs(vec.z),
-        };
-    }
+    // pub fn abs(vec: Vector3) Vector3 {
+    //     return Vector3{
+    //         .x = @fabs(vec.x),
+    //         .y = @fabs(vec.y),
+    //         .z = @fabs(vec.z),
+    //     };
+    // }
 
     pub fn fromArray(vec: [3]f32) Vector3 {
         return @bitCast(Vector3, vec);
@@ -140,3 +160,36 @@ pub fn String(comptime N: comptime_int) type {
         }
     };
 }
+
+pub const TextureFormat = enum {
+    /// Indexed color format with 8 bit indices.
+    pal256,
+
+    /// RGBA textures with 4 bit per channel
+    rgb4444,
+
+    /// RGB texture with 5 bit red, 6 bit green, and 5 bit blue channel.
+    rgb565,
+
+    /// RGB texture with 8 bit per channel.
+    /// Memory order is blue, green, red.
+    rgb888,
+
+    /// RGBA texture with 8 bit per channel.
+    /// Memory order is blue, green, red, alpha.
+    rgba8888,
+
+    /// DXT compressed textures.
+    dds,
+
+    pub fn bpp(fmt: TextureFormat) usize {
+        return switch (fmt) {
+            .pal256 => 1,
+            .rgb565 => 2,
+            .rgb4444 => 2,
+            .rgb888 => 3,
+            .rgba8888 => 4,
+            .dds => 0,
+        };
+    }
+};

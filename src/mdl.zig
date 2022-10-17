@@ -13,7 +13,7 @@ pub const LoadOptions = struct {
     scale: f32 = 1.0,
 
     pub fn transformVec(options: LoadOptions, in: Vector3) Vector3 {
-        var intermediate = options.target_coordinate_system.fromGamestudio(in);
+        var intermediate = options.target_coordinate_system.vecFromGamestudio(in);
         intermediate.x *= options.scale;
         intermediate.y *= options.scale;
         intermediate.z *= options.scale;
@@ -21,7 +21,7 @@ pub const LoadOptions = struct {
     }
 
     pub fn transformNormal(options: LoadOptions, in: Vector3) Vector3 {
-        return options.target_coordinate_system.fromGamestudio(in);
+        return options.target_coordinate_system.vecFromGamestudio(in);
     }
 };
 
@@ -80,7 +80,14 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
             const type_key = try reader.readIntLittle(u32);
 
             const has_mipmaps = (type_key & 8) != 0;
-            const format = std.meta.intToEnum(Skin.Format, type_key & ~@as(u32, 8)) catch return error.InvalidSkin;
+            const format = switch (type_key & ~@as(u32, 8)) {
+                0 => lib.TextureFormat.pal256, // for 8 bit (bpp == 1),
+                2 => lib.TextureFormat.rgb565, //  for 565 RGB,
+                3 => lib.TextureFormat.rgb4444, // 3 for 4444 ARGB (bpp == 2)
+                4 => lib.TextureFormat.rgb888, // 888 RGB
+                5 => lib.TextureFormat.rgba8888, // 13 for 8888 ARGB mipmapped (bpp = 4)
+                else => return error.InvalidSkin,
+            };
 
             var skin = Skin{
                 .format = format,
@@ -370,30 +377,12 @@ pub const Vertex = struct {
 };
 
 pub const Skin = struct {
-    format: Format,
+    format: lib.TextureFormat,
     width: u32,
     height: u32,
 
     data: []u8,
     mip_levels: ?[3][]u8,
-
-    pub const Format = enum(u32) {
-        pal256 = 0, // for 8 bit (bpp == 1),
-        rgb565 = 2, //  for 565 RGB,
-        rgb4444 = 3, // 3 for 4444 ARGB (bpp == 2)
-        rgb888 = 4, // 888 RGB
-        rgba8888 = 5, // 13 for 8888 ARGB mipmapped (bpp = 4)
-
-        pub fn bpp(fmt: Format) usize {
-            return switch (fmt) {
-                .pal256 => 1,
-                .rgb565 => 2,
-                .rgb4444 => 2,
-                .rgb888 => 3,
-                .rgba8888 => 4,
-            };
-        }
-    };
 };
 
 pub const SkinVertex = extern struct {
