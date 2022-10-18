@@ -119,18 +119,27 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
             tex.width = try reader.readIntLittle(u32);
             tex.height = try reader.readIntLittle(u32);
 
-            const tex_type = try reader.readIntLittle(u32);
-            tex.has_mipmaps = (tex_type & 8) != 0;
+            const tex_type_tag = try reader.readIntLittle(u32);
 
-            const tex_type_tag = tex_type & ~@as(u32, 8);
+            const TexType = packed struct {
+                type: u3,
+                has_mipmaps: bool,
+                unknown1: u12,
+                unknown2: u16,
+            };
 
-            tex.format = switch (tex_type_tag) {
+            const tex_type = @bitCast(TexType, tex_type_tag);
+
+            tex.has_mipmaps = tex_type.has_mipmaps;
+
+            tex.format = switch (tex_type.type) {
+                0 => lib.TextureFormat.pal256,
                 2 => lib.TextureFormat.rgb565,
                 4 => lib.TextureFormat.rgb888,
                 5 => lib.TextureFormat.rgba8888,
                 6 => lib.TextureFormat.dds,
                 else => {
-                    logger.err("Invalid texture format: {d}", .{tex_type_tag});
+                    logger.err("Invalid texture format: {d}", .{tex_type.type});
                     return error.InvalidTexture;
                 },
             };
@@ -144,8 +153,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 .rgb888 => 3 * @as(usize, tex.width) * tex.height,
                 .rgb565 => 2 * @as(usize, tex.width) * tex.height,
                 .dds => tex.width,
+                .pal256 => @as(usize, tex.width) * tex.height,
                 .@"extern" => unreachable,
-                .pal256, .rgb4444 => unreachable,
+                .rgb4444 => unreachable,
             };
 
             tex.data = try arena.alloc(u8, data_size);
@@ -555,7 +565,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         }
     }
 
-    if (header.blocks.present()) {
+    if (version == .WMB7 and header.blocks.present()) {
         try header.blocks.seekTo(source, 0);
 
         const block_count = try reader.readIntLittle(u32);
@@ -737,7 +747,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
             try vertices.resize(header.vertices.length / 12);
             for (vertices.items) |*vtx| {
                 vtx.* = Vertex{
-                    .position = try util.readVec3(reader),
+                    .position = options.transformVec(try util.readVec3(reader)),
                     .texture_coord = Vector2{ .x = 0, .y = 0 },
                     .lightmap_coord = Vector2{ .x = 0, .y = 0 },
                 };
@@ -828,7 +838,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         }
 
         var skins = try arena.alloc(Skin, 1);
-        defer arena.free(skins);
+        errdefer arena.free(skins);
 
         skins[0] = Skin{
             .texture = 0,
@@ -1309,4 +1319,17 @@ test "wmb6 prefab" {
 
     dumpLevel(.wmb6, level);
     try writeStl(level, "wmb6-prefab.stl");
+}
+
+test "wmb6 future mapentity" {
+    var file = try std.fs.cwd().openFile("data/wmb/wmb6-mapentity.wmb", .{});
+    defer file.close();
+
+    var source = std.io.StreamSource{ .file = file };
+
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
+
+    dumpLevel(.wmb6, level);
+    try writeStl(level, "wmb6-mapentity.stl");
 }
