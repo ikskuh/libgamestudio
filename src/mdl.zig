@@ -601,6 +601,16 @@ pub const UvCoords = union(enum) {
         };
     }
 
+    pub fn getUV(self: UvCoords, index: usize, width: u32, height: u32) SkinVertex(f32) {
+        return switch (self) {
+            .absolute => |list| SkinVertex(f32){
+                .u = @intToFloat(f32, list[index].u) / @intToFloat(f32, width - 1),
+                .v = @intToFloat(f32, list[index].v) / @intToFloat(f32, height - 1),
+            },
+            .relative => |list| list[index],
+        };
+    }
+
     pub fn getU(self: UvCoords, index: usize, width: u32) f32 {
         return switch (self) {
             .absolute => |list| @intToFloat(f32, list[index].u) / @intToFloat(f32, width - 1),

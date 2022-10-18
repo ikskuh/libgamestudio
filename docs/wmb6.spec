@@ -1,46 +1,47 @@
-print file header
-print ===========
-u32 magic 
-u32 # palettes.off
-u32 # palettes.len
-u32 legacy1.off
-u32 legacy1.len
+print .=============.
+print |file header|
+print '============='
+str 4 magic 
+u32 palettes.off
+u32 palettes.len
+u32 wmb6_planes.off
+u32 wmb6_planes.len
 u32 textures.off
 u32 textures.len
-u32 legacy2.off
-u32 legacy2.len
-u32 # pvs.off
-u32 # pvs.len
-u32 # bsp_nodes.off
-u32 # bsp_nodes.len
+u32 wmb6_vertices.off
+u32 wmb6_vertices.len
+u32 pvs.off
+u32 pvs.len
+u32 bsp_nodes.off
+u32 bsp_nodes.len
 u32 materials.off
 u32 materials.len
-u32 legacy3.off
-u32 legacy3.len
+u32 wmb6_faces.off
+u32 wmb6_faces.len
 u32 legacy4.off
 u32 legacy4.len
 u32 aabb_hulls.off
 u32 aabb_hulls.len
-u32 # bsp_leafs.off
-u32 # bsp_leafs.len
-u32 # bsp_blocks.off
-u32 # bsp_blocks.len
-u32 legacy5.off
-u32 legacy5.len
-u32 legacy6.off
-u32 legacy6.len
+u32 bsp_leafs.off
+u32 bsp_leafs.len
+u32 bsp_blocks.off
+u32 bsp_blocks.len
+u32 wmb6_face_list.off
+u32 wmb6_face_list.len
+u32 wmb6_edgelist.off
+u32 wmb6_edgelist.len
 u32 legacy7.off
 u32 legacy7.len
 u32 objects.off
 u32 objects.len
-u32 # lightmaps.off
-u32 # lightmaps.len
-u32 # blocks.off
-u32 # blocks.len
-u32 # legacy8.off
-u32 # legacy8.len
-u32 # lmaps_terrain.off
-u32 # lmaps_terrain.len
+u32 lightmaps.off
+u32 lightmaps.len
+u32 blocks.off
+u32 blocks.len
+u32 legacy8.off
+u32 legacy8.len
+# u32 lmaps_terrain.off
+# u32 lmaps_terrain.len
 
 print
 print texture list
@@ -104,24 +105,42 @@ replay mtl 4
 
 print 
 print aabb_hulls *aabb_hulls.len
+divs *aabb_hulls.len
 
 seek *aabb_hulls.off
 dump *aabb_hulls.len
 
-print 
-print legacy1 *legacy1.len
- 
-seek *legacy1.off
-dump *legacy1.len
+seek *aabb_hulls.off
+.loop 36
 
-seek *legacy1.off
+u32 index
+u32 # always zero
+i32 a
+i32 b
+
+.endloop
+
+print 
+print wmb6_planes *wmb6_planes.len
+ 
+seek *wmb6_planes.off
+dump *wmb6_planes.len
+
+seek *wmb6_planes.off
 pgm bsp_plane
 ! print plane *arg[0]
 ! f32 nx
 ! f32 ny
 ! f32 nz
 ! f32 dist
-! u32 index
+! u32 type
+! lut *type   0 axial_x   1 axial_y   2 axial_z   3 to_x   4 to_y   5 to_z
+# 0: Axial plane, in X
+# 1: Axial plane, in Y
+# 2: Axial plane, in Z
+# 3: Non axial plane, roughly toward X
+# 4: Non axial plane, roughly toward Y
+# 5: Non axial plane, roughly toward Z
 
 replay bsp_plane 0 
 replay bsp_plane 1
@@ -153,97 +172,79 @@ replay bsp_plane 26
 replay bsp_plane 27
 
 print 
-print legacy2 *legacy2.len vertices!
+print wmb6_vertices *wmb6_vertices.len
 
-seek *legacy2.off
-dump *legacy2.len
-seek *legacy2.off
+seek *wmb6_vertices.off
+dump *wmb6_vertices.len
+seek *wmb6_vertices.off
 
-f32 v[0].x
-f32 v[0].y
-f32 v[0].z
-f32 v[1].x
-f32 v[1].y
-f32 v[1].z
-f32 v[2].x
-f32 v[2].y
-f32 v[2].z
-f32 v[3].x
-f32 v[3].y
-f32 v[3].z
+.loop 8
+f32 vert.x
+f32 vert.y
+f32 vert.z
+.endloop
 
 print 
-print legacy3 *legacy3.len triangles?
+print wmb6_faces *wmb6_faces.len triangles?
+divs *wmb6_faces.len
 
-seek *legacy3.off
+seek *wmb6_faces.off
 dump 24
 dump 24
 dump 24
 dump 24
 
-seek *legacy3.off
+seek *wmb6_faces.off
 
-pgm triangle
-! print triangle *arg[0]
-! u16 always_0x00
-! u16 index
-! u16 index
-! u16 index
-! u16 always_0x03
-! u16 material_index?
-! u16 always_0xFF
-! u16 always_0x00
-! u32 color 
-! u32 index
+pgm face
+! print face *arg[0]
+! u16 plane_id
+! u16 side
+! u32 edge
+! u16 num_edges
+! u16 tex_info
+! u8 typelight # type of lighting, for the face
+! u8 baselight # 0=bright, 255=dark
+! u8 light[0]
+! u8 light[1]
+! i32 lightmap # Pointer inside the general light map, or -1 this define the start of the face light map
+! u32 some_index
+! print light type:
+! lut *typelight 0 normal  0xFF off  1 low_pulse  2 quick_pulse
+! print
 
-replay triangle 0
-replay triangle 1
-replay triangle 2
-replay triangle 3
-
-
+.loop 4 findex
+replay face *findex
+.endloop
 
 print 
-print legacy5 *legacy5.len
+print wmb6_face_list *wmb6_face_list.len
 
-seek *legacy5.off
-dump *legacy5.len
+seek *wmb6_face_list.off
+dump *wmb6_face_list.len
 
-seek *legacy5.off
-u32 i0
-u32 i1
-u32 i2
-u32 i3
-u32 i4
-u32 i5
-u32 i6
-u32 i7
-u32 i8
-u32 i9
-u32 i10
-u32 i11
-u32 i12
-u32 i13
+seek *wmb6_face_list.off
+
+# This structure stores a list of indexes of faces, so that a list of faces can be conveniently associated to each BSP tree leaf.
+.loop 14
+  i32 face_index
+.endloop
+# The list of faces is only used by the BSP tree leaf. This intermediary structure was made necessary because the faces are already referenced by Nodes, so a simple reference by first face and number of faces was not possible.
 
 print 
-print legacy6 *legacy6.len = 4 x 3 x 4 maybe triangles?
+print wmb6_edgelist *wmb6_edgelist.len = 4 x 3 x 4 maybe triangles?
 
-seek *legacy6.off
-dump *legacy6.len
+divs *wmb6_edgelist.len 
 
-seek *legacy6.off
-i32 v0
-i32 v1
-i32 v2
-i32 v3
-i32 v4
-i32 v5
-i32 v6
-i32 v7
-i32 v8
-i32 v9
-i32 v10
-i32 v11
+seek *wmb6_edgelist.off
+dump *wmb6_edgelist.len
+
+seek *wmb6_edgelist.off
+.loop 12
+# if lstedge[e] is positive, then lstedge[e] is an index to an Edge, and that edge is walked in the normal sense, from vertex0 to vertex1.
+# if lstedge[e] is negative, then -lstedge[e] is an index to an Edge, and that edge is walked in the inverse sense, from vertex1 to vertex0.
+i32 edge_index
+.endloop
 
 print 
 print legacy7 *legacy7.len
@@ -253,9 +254,85 @@ dump *legacy7.len
 
 seek *legacy7.off
 
-f32 a
-f32 b
-f32 c
-f32 d
-f32 e
-f32 f
+f32 bound.min.x
+f32 bound.min.y
+f32 bound.min.z
+f32 bound.max.x
+f32 bound.max.y
+f32 bound.max.z
+f32 origin.x
+f32 origin.y
+f32 origin.z
+u32 node_id0
+u32 node_id1
+u32 node_id2
+u32 node_id3
+u32 num_leafs
+u32 face_id
+u32 face_num
+
+# print "palettes"
+# seek *palettes.off
+# dump *palettes.len
+# seek *palettes.off
+
+
+print
+print pvs
+seek *pvs.off
+dump *pvs.len
+
+print
+print bsp_nodes
+seek *bsp_nodes.off
+dump *bsp_nodes.len
+
+.loop 1 node
+
+  print node *node
+  u32   legacy1[0]   # WMB1..6 only
+  u32   legacy1[1]   # WMB1..6 only
+  i16  mins[0]       # bounding box, packed shorts
+  i16  mins[1]
+  i16  mins[2]
+  i16  maxs[0] 
+  i16  maxs[1] 
+  i16  maxs[2] 
+  u32   legacy2     # WMB1..6 only
+  u32   children[0] # node index when >= 0, -(leaf index + 1) when < 0
+  u32   children[1] # node index when >= 0, -(leaf index + 1) when < 0
+  u32   legacy3[0]  # WMB1..6 only
+  u32   legacy3[1]  # WMB1..6 only
+
+.endloop
+
+print
+print bsp_leafs
+seek *bsp_leafs.off
+dump *bsp_leafs.len
+
+.loop 1 leaf
+  print leaf *leaf
+  u32  flags         #  content flags
+  i32  pvs           #  PVS offset or -1
+  i16  mins[0]       # bounding box, packed shorts
+  i16  mins[1]
+  i16  mins[2]
+  i16  maxs[0] 
+  i16  maxs[1] 
+  i16  maxs[2] 
+  u32   legacy1[0]  # WMB1..6 only
+  u32   legacy1[1]  # WMB1..6 only
+  i32   nbspblock   # offset into the bsp_blocks list
+  i32   numblocks   # number of bsp_blocks for this leaf
+.endloop
+
+print
+print bsp_blocks
+seek *bsp_blocks.off
+dump *bsp_blocks.len
+seek *bsp_blocks.off
+
+.loop 4
+  u32 block_index
+.endloop
