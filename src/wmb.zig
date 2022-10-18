@@ -82,6 +82,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         return error.VersionMismatch;
     };
 
+    if (version != .WMB7)
+        return error.VersionMismatch;
+
     // WMB1..6 only
     // if (header.palettes.present()) {
     //     try header.palettes.seekTo(source, 0);
@@ -121,12 +124,18 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
             const tex_type = try reader.readIntLittle(u32);
             tex.has_mipmaps = (tex_type & 8) != 0;
-            tex.format = switch (tex_type & ~@as(u32, 8)) {
+
+            const tex_type_tag = tex_type & ~@as(u32, 8);
+
+            tex.format = switch (tex_type_tag) {
                 5 => lib.TextureFormat.rgba8888,
                 4 => lib.TextureFormat.rgb888,
                 2 => lib.TextureFormat.rgb565,
                 6 => lib.TextureFormat.dds,
-                else => return error.InvalidTexture,
+                else => {
+                    logger.err("Invalid texture format: {d}", .{tex_type_tag});
+                    return error.InvalidTexture;
+                },
             };
 
             _ = try reader.readIntLittle(u32);
@@ -189,6 +198,20 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     //     try header.aabb_hulls.seekTo(source, 0);
     //     logger.warn("loading of aabb_hulls not supported yet.", .{});
     // }
+
+    // WMB1..6 only:
+    if (version == .WMB6 and header.legacy2.present()) {
+        try header.legacy2.seekTo(source, 0);
+
+        var vertices = std.ArrayList(Vector3).init(allocator);
+        defer vertices.deinit();
+
+        try vertices.resize(header.legacy2.length / 12);
+
+        try reader.readNoEof(std.mem.sliceAsBytes(vertices.items));
+
+        for (vertices.items) |v| std.debug.print("v {d} {d} {d}\n", .{ v.x, v.y, v.z });
+    }
 
     // BSP only
     if (header.bsp_leafs.present()) {
@@ -698,7 +721,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         }
     }
 
-    if (header.lightmaps_terrain.present()) {
+    if (version == .WMB7 and header.lightmaps_terrain.present()) {
         try header.lightmaps_terrain.seekTo(source, 0);
 
         const lightmap_count = try reader.readIntLittle(u32);
@@ -736,85 +759,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     };
 }
 
-test load {
-    var file = try std.fs.cwd().openFile("data/wmb/test.wmb", .{});
-    defer file.close();
-
-    var source = std.io.StreamSource{ .file = file };
-
-    var level = try load(std.testing.allocator, &source, .{});
-    defer level.deinit();
-
-    // if (level.info) |info| {
-    //     logger.info("info: {}", .{info});
-    // }
-
-    // for (level.textures) |tex| {
-    //     logger.info("texture: {d}×{d}\t{s}\t{s}", .{
-    //         tex.width,
-    //         tex.height,
-    //         tex.name.get(),
-    //         @tagName(tex.format),
-    //     });
-    // }
-
-    // for (level.materials) |mtl| {
-    //     logger.info("material: {s}", .{mtl.name.get()});
-    // }
-
-    // for (level.blocks) |block| {
-    //     logger.info("block: vertices={d:4}  triangles={d:4}  skins={d:2}  bbox={},{}", .{
-    //         block.vertices.len,
-    //         block.triangles.len,
-    //         block.skins.len,
-    //         block.bb_min,
-    //         block.bb_max,
-    //     });
-    // }
-
-    // for (level.objects) |object| {
-    //     logger.info("object: {}", .{object});
-    // }
-
-    // for (level.light_maps) |lm| {
-    //     logger.info("lightmap: {}×{}", .{ lm.width, lm.height });
-    // }
-
-    // for (level.terrain_light_maps) |lm| {
-    //     logger.info("terrain lightmap: {}×{} (=> {?})", .{ lm.width, lm.height, lm.object });
-    // }
-
-    // {
-    //     var stl = try std.fs.cwd().createFile("testmap.stl", .{});
-    //     defer stl.close();
-
-    //     var writer = stl.writer();
-
-    //     try writer.writeByteNTimes(0x00, 80);
-
-    //     var num_tris: u32 = 0;
-    //     for (level.blocks) |blk| {
-    //         num_tris += @intCast(u32, blk.triangles.len);
-    //     }
-    //     try writer.writeIntLittle(u32, num_tris);
-    //     for (level.blocks) |block| {
-    //         for (block.triangles) |tris| {
-    //             try writer.writeIntLittle(u32, 0);
-    //             try writer.writeIntLittle(u32, 0);
-    //             try writer.writeIntLittle(u32, 0);
-    //             for (tris.indices) |i| {
-    //                 const p = block.vertices[i].position;
-    //                 try writer.writeIntLittle(u32, @bitCast(u32, p.x));
-    //                 try writer.writeIntLittle(u32, @bitCast(u32, p.y));
-    //                 try writer.writeIntLittle(u32, @bitCast(u32, p.z));
-    //             }
-    //             try writer.writeIntLittle(u16, 0);
-    //         }
-    //     }
-}
-
 pub const Version = enum(u32) {
-    // TODO: Support WMB6 = str2id("WMB6"),
+    WMB6 = str2id("WMB6"),
     WMB7 = str2id("WMB7"),
 
     fn str2id(comptime name: *const [4]u8) u32 {
@@ -1084,6 +1030,16 @@ const bits = struct {
         pub fn seekTo(list: LIST, source: *std.io.StreamSource, offset: u32) !void {
             try source.seekTo(@as(u64, list.offset) + offset);
         }
+
+        pub fn format(list: LIST, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
+            if (list.offset > 0 and list.length > 0) {
+                try writer.print("LIST(0x{X}+{d})", .{ list.offset, list.length });
+            } else {
+                try writer.print("LIST(empty)", .{});
+            }
+        }
     };
 
     const WMB_HEADER = extern struct {
@@ -1110,3 +1066,127 @@ const bits = struct {
         lightmaps_terrain: LIST, // lightmaps for terrains
     };
 };
+
+fn dumpLevel(comptime tag: @TypeOf(.tag), level: Level) void {
+    const log = std.log.scoped(tag);
+
+    if (level.info) |info| {
+        log.info("info: {}", .{info});
+    }
+
+    for (level.textures) |tex| {
+        log.info("texture: {d}×{d}\t{s}\t{s}", .{
+            tex.width,
+            tex.height,
+            tex.name.get(),
+            @tagName(tex.format),
+        });
+    }
+
+    for (level.materials) |mtl| {
+        log.info("material: {s}", .{mtl.name.get()});
+    }
+
+    for (level.blocks) |block| {
+        log.info("block: vertices={d:4}  triangles={d:4}  skins={d:2}  bbox={},{}", .{
+            block.vertices.len,
+            block.triangles.len,
+            block.skins.len,
+            block.bb_min,
+            block.bb_max,
+        });
+    }
+
+    for (level.objects) |object| {
+        log.info("object: {}", .{object});
+    }
+
+    for (level.light_maps) |lm| {
+        log.info("lightmap: {}×{}", .{ lm.width, lm.height });
+    }
+
+    for (level.terrain_light_maps) |lm| {
+        log.info("terrain lightmap: {}×{} (=> {?})", .{ lm.width, lm.height, lm.object });
+    }
+}
+
+fn writeStl(level: Level, path: []const u8) !void {
+    var stl = try std.fs.cwd().createFile(path, .{});
+    defer stl.close();
+
+    var writer = stl.writer();
+
+    try writer.writeByteNTimes(0x00, 80);
+
+    var num_tris: u32 = 0;
+    for (level.blocks) |blk| {
+        num_tris += @intCast(u32, blk.triangles.len);
+    }
+    try writer.writeIntLittle(u32, num_tris);
+    for (level.blocks) |block| {
+        for (block.triangles) |tris| {
+            try writer.writeIntLittle(u32, 0);
+            try writer.writeIntLittle(u32, 0);
+            try writer.writeIntLittle(u32, 0);
+            for (tris.indices) |i| {
+                const p = block.vertices[i].position;
+                try writer.writeIntLittle(u32, @bitCast(u32, p.x));
+                try writer.writeIntLittle(u32, @bitCast(u32, p.y));
+                try writer.writeIntLittle(u32, @bitCast(u32, p.z));
+            }
+            try writer.writeIntLittle(u16, 0);
+        }
+    }
+}
+
+test "wmb7" {
+    var file = try std.fs.cwd().openFile("data/wmb/test.wmb", .{});
+    defer file.close();
+
+    var source = std.io.StreamSource{ .file = file };
+
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
+
+    // dumpLevel(.wmb7, level);
+    // try writeStl(level, "wmb7.stl");
+}
+
+test "wmb6 empty" {
+    var file = try std.fs.cwd().openFile("data/wmb/wmb6/empty.wmb", .{});
+    defer file.close();
+
+    var source = std.io.StreamSource{ .file = file };
+
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
+
+    dumpLevel(.wmb6, level);
+    try writeStl(level, "wmb6-empty.stl");
+}
+
+test "wmb6 single block" {
+    var file = try std.fs.cwd().openFile("data/wmb/wmb6/block.wmb", .{});
+    defer file.close();
+
+    var source = std.io.StreamSource{ .file = file };
+
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
+
+    dumpLevel(.wmb6, level);
+    try writeStl(level, "wmb6-block.stl");
+}
+
+test "wmb6 prefab" {
+    var file = try std.fs.cwd().openFile("data/wmb/wmb6/prefab.wmb", .{});
+    defer file.close();
+
+    var source = std.io.StreamSource{ .file = file };
+
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
+
+    dumpLevel(.wmb6, level);
+    try writeStl(level, "wmb6-prefab.stl");
+}
