@@ -86,7 +86,7 @@ print "group" "skins"
     str *width filename
   .else # not extern
     .if *skin_type 2 # RGB565
-      bitmap *width *height rgb565
+      bitmap *width *height rgb565 texture.ppm
     .endif
     .if *skin_type 12 # RGB888 + mips
       .if *skindex 0
@@ -129,11 +129,18 @@ tell
   u16 index_uv1[0]
   u16 index_uv1[1]
   u16 index_uv1[2]
-  u32 material1
-  u16 index_uv2[0]
-  u16 index_uv2[1]
-  u16 index_uv2[2]
-  u32 material2
+  
+  .if *md7_triangle_stc_size 16
+    u32 # unused
+  .endif
+
+  .if *md7_triangle_stc_size 26
+    u32 material1
+    u16 index_uv2[0]
+    u16 index_uv2[1]
+    u16 index_uv2[2]
+    u32 material2
+  .endif
 
 .endloop
 
@@ -147,10 +154,18 @@ tell
   f32 x
   f32 y
   f32 z
-  u16 bone
-  f32 nx
-  f32 ny
-  f32 nz
+
+  .if *md7_mainvertex_stc_size 16
+    u16 # unused
+    u8 normal_index
+    u8 # unused
+  .endif
+  .if *md7_mainvertex_stc_size 26
+    u16 bone
+    f32 nx
+    f32 ny
+    f32 nz
+  .endif
 
 .endloop
 

@@ -25,7 +25,7 @@ pub const LoadOptions = struct {
     }
 };
 
-pub const LoadError = error{ VersionMismatch, EndOfStream, OutOfMemory, InvalidSkin, InvalidFrame, InvalidNormal, NoFrames };
+pub const LoadError = error{ VersionMismatch, EndOfStream, OutOfMemory, InvalidSkin, InvalidFrame, InvalidNormal, InvalidSize, NoFrames };
 
 pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options: LoadOptions) (std.io.StreamSource.ReadError || std.io.StreamSource.SeekError || LoadError)!Model {
     comptime {
@@ -55,6 +55,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     var bones = std.ArrayList(Bone).init(arena);
     defer bones.deinit();
 
+    var deformers = std.ArrayList(Deformer).init(arena);
+    defer deformers.deinit();
+
     var version_tag: [4]u8 = undefined;
 
     try reader.readNoEof(&version_tag);
@@ -66,6 +69,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     };
 
     switch (version) {
+        .mdl2 => return error.VersionMismatch, // not supported yet
         .mdl3, .mdl4, .mdl5 => {
             var header = try reader.readStruct(bits.MDL_HEADER);
             if (header.numframes == 0) {
@@ -190,7 +194,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     }
                 }
 
-                std.debug.print("uv offset = {}\n", .{try source.getPos()});
+                // std.debug.print("uv offset = {}\n", .{try source.getPos()});
 
                 // Decode uv coordinates
                 {
@@ -214,28 +218,64 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 {
                     try triangles.resize(num_tris);
                     for (triangles.items) |*tris| {
-                        tris.* = Triangle{
-                            .indices_3d = .{
-                                try reader.readIntLittle(u16),
-                                try reader.readIntLittle(u16),
-                                try reader.readIntLittle(u16),
+                        switch (header.md7_triangle_stc_size) {
+                            12 => tris.* = Triangle{
+                                .indices_3d = .{
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                },
+                                .indices_uv1 = .{
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                },
                             },
-                            .indices_uv1 = .{
-                                try reader.readIntLittle(u16),
-                                try reader.readIntLittle(u16),
-                                try reader.readIntLittle(u16),
+
+                            16 => {
+                                tris.* = Triangle{
+                                    .indices_3d = .{
+                                        try reader.readIntLittle(u16),
+                                        try reader.readIntLittle(u16),
+                                        try reader.readIntLittle(u16),
+                                    },
+                                    .indices_uv1 = .{
+                                        try reader.readIntLittle(u16),
+                                        try reader.readIntLittle(u16),
+                                        try reader.readIntLittle(u16),
+                                    },
+                                };
+                                _ = try reader.readIntLittle(u32);
                             },
-                            .material1 = try reader.readIntLittle(u32),
-                            .indices_uv2 = .{
-                                try reader.readIntLittle(u16),
-                                try reader.readIntLittle(u16),
-                                try reader.readIntLittle(u16),
+
+                            26 => tris.* = Triangle{
+                                .indices_3d = .{
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                },
+                                .indices_uv1 = .{
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                },
+                                .material1 = try reader.readIntLittle(u32),
+                                .indices_uv2 = .{
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                    try reader.readIntLittle(u16),
+                                },
+                                .material2 = try reader.readIntLittle(u32),
                             },
-                            .material2 = try reader.readIntLittle(u32),
-                        };
-                        if (tris.material1.? == std.math.maxInt(u32)) tris.material1 = null;
-                        if (tris.material2.? == std.math.maxInt(u32)) tris.material2 = null;
-                        if (std.mem.allEqual(u16, &tris.indices_uv2.?, std.math.maxInt(u16))) tris.indices_uv2 = null;
+
+                            else => {
+                                logger.err("unsupported triangle size: {}", .{header.md7_triangle_stc_size});
+                                return error.InvalidSize;
+                            },
+                        }
+                        if (tris.material1 != null and tris.material1.? == std.math.maxInt(u32)) tris.material1 = null;
+                        if (tris.material2 != null and tris.material2.? == std.math.maxInt(u32)) tris.material2 = null;
+                        if (tris.indices_uv2 != null and std.mem.allEqual(u16, &tris.indices_uv2.?, std.math.maxInt(u16))) tris.indices_uv2 = null;
                     }
                 }
 
@@ -247,7 +287,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 {
                     try vertices.resize(num_verts);
                     for (vertices.items) |*vert| {
-                        vert.* = try decodeVertex(reader);
+                        vert.* = try decodeVertex(reader, header.md7_mainvertex_stc_size);
                     }
                 }
 
@@ -256,7 +296,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 // decode frames
                 {
                     try frames.resize(num_frames);
-                    for (frames.items) |*frame, frame_index| {
+                    for (frames.items) |*frame| {
                         frame.* = Frame{
                             .bb_min = .{ .x = 0, .y = 0, .z = 0 },
                             .bb_max = .{ .x = 0, .y = 0, .z = 0 },
@@ -267,12 +307,12 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         const vertex_count = try reader.readIntLittle(u32);
                         const matrix_count = try reader.readIntLittle(u32);
 
-                        std.debug.print("{} {} {} {}\n", .{ frame_index, frame.name, vertex_count, matrix_count });
+                        // std.debug.print("{} {} {} {}\n", .{ frame_index, frame.name, vertex_count, matrix_count });
 
                         if (vertex_count > 0) {
                             frame.vertices = try arena.alloc(Vertex, vertex_count);
                             for (frame.vertices) |*vert| {
-                                vert.* = try decodeVertex(reader);
+                                vert.* = try decodeVertex(reader, header.md7_framevertex_stc_size);
                             }
                         }
                         if (matrix_count > 0) {
@@ -296,8 +336,43 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                 // decode deformers
 
-                if (num_deformers > 0) {
-                    @panic("deformers not supported yet");
+                {
+                    try deformers.resize(num_deformers);
+                    for (deformers.items) |*deformer| {
+                        deformer.* = Deformer{
+                            .version = try reader.readIntLittle(u8),
+                            .type = try reader.readIntLittle(u8),
+                            .group_index = undefined,
+                            .elements = undefined,
+                        };
+
+                        _ = try reader.readIntLittle(u8);
+                        _ = try reader.readIntLittle(u8);
+
+                        deformer.group_index = try reader.readIntLittle(u32);
+
+                        const element_count = try reader.readIntLittle(u32);
+                        deformer.elements = try arena.alloc(Deformer.Element, element_count);
+
+                        const deformerdata_size = try reader.readIntLittle(u32);
+                        _ = deformerdata_size;
+
+                        for (deformer.elements) |*elem| {
+                            elem.* = Deformer.Element{
+                                .index = try reader.readIntLittle(u32),
+                                .name = try String(20).read(reader),
+                                .weights = undefined,
+                            };
+                            const num_weights = try reader.readIntLittle(u32);
+                            elem.weights = try arena.alloc(Deformer.Weight, num_weights);
+                            for (elem.weights) |*weight| {
+                                weight.* = Deformer.Weight{
+                                    .index = try reader.readIntLittle(u32),
+                                    .weight = try util.readFloat(reader),
+                                };
+                            }
+                        }
+                    }
                 }
             }
 
@@ -321,16 +396,36 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         .triangles = triangles.toOwnedSlice(),
         .frames = frames.toOwnedSlice(),
         .bones = bones.toOwnedSlice(),
+        .deformers = deformers.toOwnedSlice(),
     };
 }
 
-fn decodeVertex(reader: anytype) !Vertex {
-    var vtx = Vertex{
-        .position = try util.readVec3(reader),
-        .bone = try reader.readIntLittle(u16),
-        .normal = try util.readVec3(reader),
+fn decodeVertex(reader: anytype, vertex_size: usize) !Vertex {
+    var vtx = switch (vertex_size) {
+        16 => blk: {
+            var v = Vertex{
+                .position = try util.readVec3(reader),
+                .bone = null,
+                .normal = undefined,
+            };
+
+            _ = try reader.readIntLittle(u16);
+            v.normal = Vector3.fromArray(normal_lut[try reader.readIntLittle(u8)]);
+            _ = try reader.readIntLittle(u8);
+
+            break :blk v;
+        },
+        26 => Vertex{
+            .position = try util.readVec3(reader),
+            .bone = try reader.readIntLittle(u16),
+            .normal = try util.readVec3(reader),
+        },
+        else => {
+            logger.err("unsupported vertex size: {}", .{vertex_size});
+            return error.InvalidSize;
+        },
     };
-    if (vtx.bone.? == std.math.maxInt(u16)) vtx.bone = null;
+    if (vtx.bone != null and vtx.bone.? == std.math.maxInt(u16)) vtx.bone = null;
     return vtx;
 }
 
@@ -364,7 +459,7 @@ fn decodeSkin(version: Version, arena: std.mem.Allocator, default_width: u32, de
     };
 
     switch (version) {
-        .mdl3, .mdl4 => {}, // using size from the header
+        .mdl2, .mdl3, .mdl4 => {}, // using size from the header
         .mdl5, .mdl7 => {
             skin.width = try reader.readIntLittle(u32);
             skin.height = try reader.readIntLittle(u32);
@@ -449,6 +544,7 @@ fn readPackedVector(options: LoadOptions, header: bits.MDL_HEADER, reader: anyty
 }
 
 pub const Version = enum(u32) {
+    mdl2 = str2id("MDL2"),
     mdl3 = str2id("MDL3"),
     mdl4 = str2id("MDL4"),
     mdl5 = str2id("MDL5"),
@@ -469,11 +565,30 @@ pub const Model = struct {
     triangles: []Triangle,
     frames: []Frame,
     bones: []Bone,
+    deformers: []Deformer,
 
     pub fn deinit(model: *Model) void {
         model.memory.deinit();
         model.* = undefined;
     }
+};
+
+pub const Deformer = struct {
+    group_index: u32,
+    elements: []Element,
+    version: u8,
+    type: u8,
+
+    pub const Element = struct {
+        index: u32,
+        name: String(20) = .{},
+        weights: []Weight,
+    };
+
+    pub const Weight = struct {
+        index: u32,
+        weight: f32,
+    };
 };
 
 pub const UvCoords = union(enum) {
@@ -483,6 +598,20 @@ pub const UvCoords = union(enum) {
     pub fn len(self: UvCoords) usize {
         return switch (self) {
             inline else => |v| v.len,
+        };
+    }
+
+    pub fn getU(self: UvCoords, index: usize, width: u32) f32 {
+        return switch (self) {
+            .absolute => |list| @intToFloat(f32, list[index].u) / @intToFloat(f32, width - 1),
+            .relative => |list| list[index].v,
+        };
+    }
+
+    pub fn getV(self: UvCoords, index: usize, height: u32) f32 {
+        return switch (self) {
+            .absolute => |list| @intToFloat(f32, list[index].v) / @intToFloat(f32, height - 1),
+            .relative => |list| list[index].v,
         };
     }
 };
@@ -660,6 +789,24 @@ fn dumpModel(comptime topic: anytype, model: Model) void {
             frame.vertices.len,
         });
     }
+
+    for (model.deformers) |deformer, i| {
+        log.warn("deformer {}: type={}, version={}, group={}, elements={}", .{
+            i,
+            deformer.type,
+            deformer.version,
+            deformer.group_index,
+            deformer.elements.len,
+        });
+        for (deformer.elements) |element, j| {
+            log.warn("  element {}: index={}, name='{}', weights={}", .{
+                j,
+                element.index,
+                element.name,
+                element.weights.len,
+            });
+        }
+    }
 }
 
 fn writeUv(model: Model, path: []const u8) !void {
@@ -671,15 +818,18 @@ fn writeUv(model: Model, path: []const u8) !void {
 
     try writer.writeIntLittle(u32, @intCast(u32, model.triangles.len));
 
+    const w = model.skins[0].width;
+    const h = model.skins[0].height;
+
     for (model.triangles) |tris| {
         const normal = Vector3{ .x = 0, .y = 0, .z = 0 }; //
 
         try util.writeVec3(writer, normal);
 
-        for (tris.indices_uv) |index| {
+        for (tris.indices_uv1) |index| {
             try util.writeVec3(writer, Vector3{
-                .x = @intToFloat(f32, model.skin_vertices[index].u),
-                .y = @intToFloat(f32, model.skin_vertices[index].v),
+                .x = model.skin_vertices.getU(index, w),
+                .y = model.skin_vertices.getV(index, h),
                 .z = 0.0,
             });
         }
@@ -739,16 +889,43 @@ test "load mdl3" {
     // try writeFrame(model, "3d-mdl3.stl", 0);
 }
 
+// TODO: Implement MDL2 loading
+// test "load mdl2" {
+//     const test_files = [_][]const u8{
+//         "data/mdl/mdl2-bush.mdl",
+//         "data/mdl/mdl2-grass.mdl",
+//         "data/mdl/mdl2-tree.mdl",
+//     };
+
+//     for (test_files) |filename| {
+//         std.debug.print("decoding {s}...\n", .{filename});
+
+//         var file = try std.fs.cwd().openFile(filename, .{});
+//         defer file.close();
+
+//         var source = std.io.StreamSource{ .file = file };
+
+//         var model = try load(std.testing.allocator, &source, .{});
+//         defer model.deinit();
+
+//         dumpModel(.mdl2, model);
+//         try writeUv(model, "uv-mdl2.stl");
+//         try writeFrame(model, "3d-mdl2.stl", 0);
+//     }
+// }
+
 test "load mdl7" {
     const test_files = [_][]const u8{
-        // "data/mdl/mdl7-ball.mdl",
-        // "data/mdl/mdl7-blob.mdl",
-        // "data/mdl/mdl7-earth.mdl",
+        "data/mdl/mdl7-ball.mdl",
+        "data/mdl/mdl7-blob.mdl",
+        "data/mdl/mdl7-earth.mdl",
         "data/mdl/mdl7-player.mdl",
         "data/mdl/mdl7-tree2.mdl",
     };
 
     for (test_files) |filename| {
+        std.debug.print("decoding {s}...\n", .{filename});
+
         var file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
@@ -757,8 +934,32 @@ test "load mdl7" {
         var model = try load(std.testing.allocator, &source, .{});
         defer model.deinit();
 
-        dumpModel(.mdl7, model);
-        // try writeUv(model, "uv-mdl3.stl");
-        // try writeFrame(model, "3d-mdl3.stl", 0);
+        // dumpModel(.mdl7, model);
+        // try writeUv(model, "uv-mdl7.stl");
+        // try writeFrame(model, "3d-mdl7.stl", 0);
+    }
+}
+
+test "load mdl4" {
+    const test_files = [_][]const u8{
+        "data/mdl/mdl4-golem.mdl",
+        "data/mdl/mdl4-human.mdl",
+        "data/mdl/mdl4-norc.mdl",
+    };
+
+    for (test_files) |filename| {
+        std.debug.print("decoding {s}...\n", .{filename});
+
+        var file = try std.fs.cwd().openFile(filename, .{});
+        defer file.close();
+
+        var source = std.io.StreamSource{ .file = file };
+
+        var model = try load(std.testing.allocator, &source, .{});
+        defer model.deinit();
+
+        // dumpModel(.mdl4, model);
+        // try writeUv(model, "uv-mdl4.stl");
+        // try writeFrame(model, "3d-mdl4.stl", 0);
     }
 }
