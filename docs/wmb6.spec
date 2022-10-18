@@ -26,8 +26,8 @@ u32 bsp_leafs.off
 u32 bsp_leafs.len
 u32 bsp_blocks.off
 u32 bsp_blocks.len
-u32 wmb6_face_list.off
-u32 wmb6_face_list.len
+u32 wmb6_edges.off
+u32 wmb6_edges.len
 u32 wmb6_edgelist.off
 u32 wmb6_edgelist.len
 u32 legacy7.off
@@ -42,6 +42,8 @@ u32 legacy8.off
 u32 legacy8.len
 # u32 lmaps_terrain.off
 # u32 lmaps_terrain.len
+
+tell
 
 print
 print texture list
@@ -218,16 +220,18 @@ replay face *findex
 .endloop
 
 print 
-print wmb6_face_list *wmb6_face_list.len
+print wmb6_edges *wmb6_edges.len
 
-seek *wmb6_face_list.off
-dump *wmb6_face_list.len
+seek *wmb6_edges.off
+dump *wmb6_edges.len
 
-seek *wmb6_face_list.off
+seek *wmb6_edges.off
 
 # This structure stores a list of indexes of faces, so that a list of faces can be conveniently associated to each BSP tree leaf.
-.loop 14
-  i32 face_index
+.loop 7 index
+print edge *index
+  i32 i_from
+  i32 i_to
 .endloop
 # The list of faces is only used by the BSP tree leaf. This intermediary structure was made necessary because the faces are already referenced by Nodes, so a simple reference by first face and number of faces was not possible.
 
@@ -336,3 +340,25 @@ seek *bsp_blocks.off
 .loop 4
   u32 block_index
 .endloop
+
+seek 0
+
+# we couldn't find the edge list
+# so let's search for something that CAN be our sequence
+#   findpattern  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0  0|1|2|3 0 0 0
+# 
+# remove duplicates
+#   grep -v '{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }' /tmp/decode.txt > /tmp/tables.txt
+#
+# clean up all ZERO values
+#   found match at 364: { 0, 0, 0, 1, 1, 2, 2, 0, 0, 3, 3, 1 }
+#   found match at 368: { 0, 0, 1, 1, 2, 2, 0, 0, 3, 3, 1, 2 }
+#   found match at 372: { 0, 1, 1, 2, 2, 0, 0, 3, 3, 1, 2, 3 }
+#   found match at 376: { 1, 1, 2, 2, 0, 0, 3, 3, 1, 2, 3, 1 }
+#   found match at 380: { 1, 2, 2, 0, 0, 3, 3, 1, 2, 3, 1, 2 }
+#   found match at 384: { 2, 2, 0, 0, 3, 3, 1, 2, 3, 1, 2, 3 }
+#
+# 364 is actually available in the headers. that's the list we're searching for
+
+
+

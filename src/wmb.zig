@@ -37,7 +37,7 @@ pub const LoadOptions = struct {
     }
 };
 
-pub const LoadError = error{ VersionMismatch, InvalidTexture, InvalidObject, InvalidLightmapSize, EndOfStream, OutOfMemory };
+pub const LoadError = error{ VersionMismatch, InvalidTexture, InvalidObject, InvalidLightmapSize, InvalidFace, EndOfStream, OutOfMemory };
 
 pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options: LoadOptions) (std.io.StreamSource.ReadError || std.io.StreamSource.SeekError || LoadError)!Level {
     comptime {
@@ -81,9 +81,6 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         logger.warn("attempt to load unsupported wmb version: {s}", .{std.fmt.fmtSliceEscapeUpper(&header.version)});
         return error.VersionMismatch;
     };
-
-    if (version != .WMB7)
-        return error.VersionMismatch;
 
     // WMB1..6 only
     // if (header.palettes.present()) {
@@ -199,20 +196,6 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     //     try header.aabb_hulls.seekTo(source, 0);
     //     logger.warn("loading of aabb_hulls not supported yet.", .{});
     // }
-
-    // WMB1..6 only:
-    if (version == .WMB6 and header.legacy2.present()) {
-        try header.legacy2.seekTo(source, 0);
-
-        var vertices = std.ArrayList(Vector3).init(allocator);
-        defer vertices.deinit();
-
-        try vertices.resize(header.legacy2.length / 12);
-
-        try reader.readNoEof(std.mem.sliceAsBytes(vertices.items));
-
-        for (vertices.items) |v| std.debug.print("v {d} {d} {d}\n", .{ v.x, v.y, v.z });
-    }
 
     // BSP only
     if (header.bsp_leafs.present()) {
@@ -745,6 +728,142 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         }
     }
 
+    if (version == .WMB6 and header.vertices.present() and header.edgelist.present() and header.edges.present() and header.faces.present()) {
+        var vertices = std.ArrayList(Vertex).init(arena);
+        defer vertices.deinit();
+
+        {
+            try header.vertices.seekTo(source, 0);
+            try vertices.resize(header.vertices.length / 12);
+            for (vertices.items) |*vtx| {
+                vtx.* = Vertex{
+                    .position = try util.readVec3(reader),
+                    .texture_coord = Vector2{ .x = 0, .y = 0 },
+                    .lightmap_coord = Vector2{ .x = 0, .y = 0 },
+                };
+            }
+        }
+
+        const Edge = [2]u32;
+        var edges = std.ArrayList(Edge).init(arena);
+        defer edges.deinit();
+
+        {
+            try header.edges.seekTo(source, 0);
+            try edges.resize(header.edges.length / 8);
+            try reader.readNoEof(std.mem.sliceAsBytes(edges.items));
+        }
+
+        var edgelist = std.ArrayList(i32).init(arena);
+        defer edgelist.deinit();
+
+        {
+            try header.edgelist.seekTo(source, 0);
+            try edgelist.resize(header.edges.length / 4);
+            try reader.readNoEof(std.mem.sliceAsBytes(edgelist.items));
+        }
+
+        var triangles = std.ArrayList(Triangle).init(arena);
+        defer triangles.deinit();
+
+        {
+            try header.faces.seekTo(source, 0);
+            const face_count = header.faces.length / 24;
+            var i: usize = 0;
+            while (i < face_count) : (i += 1) {
+                const plane_id = try reader.readIntLittle(u16);
+                const side = try reader.readIntLittle(u16);
+                const edge = try reader.readIntLittle(u32);
+                const num_edges = try reader.readIntLittle(u16);
+                const tex_info = try reader.readIntLittle(u16);
+                const typelight = try reader.readIntLittle(u8); // type of lighting, for the face
+                const baselight = try reader.readIntLittle(u8); // # 0=bright, 255=dark
+                const light0 = try reader.readIntLittle(u8);
+                const light1 = try reader.readIntLittle(u8);
+                const lightmap = try reader.readIntLittle(i32); // Pointer inside the general light map, or -1 this define the start of the face light map
+                const some_index = try reader.readIntLittle(u32);
+
+                _ = plane_id;
+                _ = side;
+                _ = tex_info;
+                _ = typelight;
+                _ = baselight;
+                _ = light0;
+                _ = light1;
+                _ = lightmap;
+                _ = some_index;
+
+                var edge_src = try arena.alloc(i32, num_edges);
+                var tris_edges = try arena.alloc(Edge, num_edges);
+                for (edge_src) |*src, j| {
+                    src.* = edgelist.items[edge + j];
+                }
+
+                for (tris_edges) |*e, j| {
+                    e.* = edges.items[std.math.absCast(edge_src[j])];
+                    if (edge_src[j] < 0) std.mem.swap(u32, &e[0], &e[1]);
+                }
+
+                for (tris_edges) |left, j| {
+                    const right = tris_edges[(j + 1) % tris_edges.len];
+                    if (left[1] != right[0])
+                        return error.InvalidFace;
+                }
+
+                // perform trivial fan triangulation:
+                // all our faces are flat by design and also convex
+
+                var j: usize = 2;
+                while (j < num_edges) : (j += 1) {
+                    try triangles.append(Triangle{
+                        .indices = .{
+                            @intCast(u16, tris_edges[0][0]),
+                            @intCast(u16, tris_edges[j - 1][0]),
+                            @intCast(u16, tris_edges[j - 0][0]),
+                        },
+                        .skin = 0,
+                    });
+                }
+            }
+        }
+
+        var skins = try arena.alloc(Skin, 1);
+        defer arena.free(skins);
+
+        skins[0] = Skin{
+            .texture = 0,
+            .lightmap = 0,
+            .material = 0,
+            .ambient = 50,
+            .albedo = 0,
+            .flags = .{
+                .flat = false,
+                .sky = false,
+                .passable = false,
+                .smooth = false,
+                .flag1 = false,
+                .flag2 = false,
+                .flag3 = false,
+                .flag4 = false,
+                .flag5 = false,
+                .flag6 = false,
+                .flag7 = false,
+                .flag8 = false,
+            },
+        };
+
+        var wmb6_block = Block{
+            .bb_min = Vector3.fromArray(.{ 0, 0, 0 }),
+            .bb_max = Vector3.fromArray(.{ 0, 0, 0 }),
+
+            .vertices = vertices.toOwnedSlice(),
+            .triangles = triangles.toOwnedSlice(),
+            .skins = skins,
+        };
+
+        try blocks.append(wmb6_block);
+    }
+
     return Level{
         .memory = arena_instance,
 
@@ -1046,19 +1165,19 @@ const bits = struct {
     const WMB_HEADER = extern struct {
         version: [4]u8 = "WMB7".*,
         palettes: LIST, // WMB1..6 only
-        legacy1: LIST, // WMB1..6 only
+        planes: LIST, // WMB1..6 only
         textures: LIST, // textures list
-        legacy2: LIST, // WMB1..6 only
+        vertices: LIST, // WMB1..6 only
         pvs: LIST, // BSP only
         bsp_nodes: LIST, // BSP only
         materials: LIST, // material names
-        legacy3: LIST, // WMB1..6 only
+        faces: LIST, // WMB1..6 only
         legacy4: LIST, // WMB1..6 only
         aabb_hulls: LIST, // WMB1..6 only
         bsp_leafs: LIST, // BSP only
         bsp_blocks: LIST, // BSP only
-        legacy5: LIST, // WMB1..6 only
-        legacy6: LIST, // WMB1..6 only
+        edges: LIST, // WMB1..6 only
+        edgelist: LIST, // WMB1..6 only
         legacy7: LIST, // WMB1..6 only
         objects: LIST, // entities, paths, sounds, etc.
         lightmaps: LIST, // lightmaps for blocks
@@ -1166,28 +1285,28 @@ test "wmb7" {
 //     try writeStl(level, "wmb6-empty.stl");
 // }
 
-// test "wmb6 single block" {
-//     var file = try std.fs.cwd().openFile("data/wmb/wmb6/block.wmb", .{});
-//     defer file.close();
+test "wmb6 single block" {
+    var file = try std.fs.cwd().openFile("data/wmb/wmb6/block.wmb", .{});
+    defer file.close();
 
-//     var source = std.io.StreamSource{ .file = file };
+    var source = std.io.StreamSource{ .file = file };
 
-//     var level = try load(std.testing.allocator, &source, .{});
-//     defer level.deinit();
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
 
-//     dumpLevel(.wmb6, level);
-//     try writeStl(level, "wmb6-block.stl");
-// }
+    dumpLevel(.wmb6, level);
+    try writeStl(level, "wmb6-block.stl");
+}
 
-// test "wmb6 prefab" {
-//     var file = try std.fs.cwd().openFile("data/wmb/wmb6/prefab.wmb", .{});
-//     defer file.close();
+test "wmb6 prefab" {
+    var file = try std.fs.cwd().openFile("data/wmb/wmb6/prefab.wmb", .{});
+    defer file.close();
 
-//     var source = std.io.StreamSource{ .file = file };
+    var source = std.io.StreamSource{ .file = file };
 
-//     var level = try load(std.testing.allocator, &source, .{});
-//     defer level.deinit();
+    var level = try load(std.testing.allocator, &source, .{});
+    defer level.deinit();
 
-//     dumpLevel(.wmb6, level);
-//     try writeStl(level, "wmb6-prefab.stl");
-// }
+    dumpLevel(.wmb6, level);
+    try writeStl(level, "wmb6-prefab.stl");
+}
