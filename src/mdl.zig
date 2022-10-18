@@ -421,6 +421,11 @@ const bits = struct {
         unused4: u32, // not used
     };
 
+    const MDL7_HEADER = extern struct {
+        version: [4]u8, // // "MDL7"
+
+    };
+
     comptime {
         // The size of this header is 0x54 bytes (84).
         std.debug.assert(@sizeOf(MDL_HEADER) == 0x54);
