@@ -128,9 +128,9 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
             const tex_type_tag = tex_type & ~@as(u32, 8);
 
             tex.format = switch (tex_type_tag) {
-                5 => lib.TextureFormat.rgba8888,
-                4 => lib.TextureFormat.rgb888,
                 2 => lib.TextureFormat.rgb565,
+                4 => lib.TextureFormat.rgb888,
+                5 => lib.TextureFormat.rgba8888,
                 6 => lib.TextureFormat.dds,
                 else => {
                     logger.err("Invalid texture format: {d}", .{tex_type_tag});
@@ -147,6 +147,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 .rgb888 => 3 * @as(usize, tex.width) * tex.height,
                 .rgb565 => 2 * @as(usize, tex.width) * tex.height,
                 .dds => tex.width,
+                .@"extern" => unreachable,
                 .pal256, .rgb4444 => unreachable,
             };
 
@@ -1152,41 +1153,41 @@ test "wmb7" {
     // try writeStl(level, "wmb7.stl");
 }
 
-test "wmb6 empty" {
-    var file = try std.fs.cwd().openFile("data/wmb/wmb6/empty.wmb", .{});
-    defer file.close();
+// test "wmb6 empty" {
+//     var file = try std.fs.cwd().openFile("data/wmb/wmb6/empty.wmb", .{});
+//     defer file.close();
 
-    var source = std.io.StreamSource{ .file = file };
+//     var source = std.io.StreamSource{ .file = file };
 
-    var level = try load(std.testing.allocator, &source, .{});
-    defer level.deinit();
+//     var level = try load(std.testing.allocator, &source, .{});
+//     defer level.deinit();
 
-    dumpLevel(.wmb6, level);
-    try writeStl(level, "wmb6-empty.stl");
-}
+//     dumpLevel(.wmb6, level);
+//     try writeStl(level, "wmb6-empty.stl");
+// }
 
-test "wmb6 single block" {
-    var file = try std.fs.cwd().openFile("data/wmb/wmb6/block.wmb", .{});
-    defer file.close();
+// test "wmb6 single block" {
+//     var file = try std.fs.cwd().openFile("data/wmb/wmb6/block.wmb", .{});
+//     defer file.close();
 
-    var source = std.io.StreamSource{ .file = file };
+//     var source = std.io.StreamSource{ .file = file };
 
-    var level = try load(std.testing.allocator, &source, .{});
-    defer level.deinit();
+//     var level = try load(std.testing.allocator, &source, .{});
+//     defer level.deinit();
 
-    dumpLevel(.wmb6, level);
-    try writeStl(level, "wmb6-block.stl");
-}
+//     dumpLevel(.wmb6, level);
+//     try writeStl(level, "wmb6-block.stl");
+// }
 
-test "wmb6 prefab" {
-    var file = try std.fs.cwd().openFile("data/wmb/wmb6/prefab.wmb", .{});
-    defer file.close();
+// test "wmb6 prefab" {
+//     var file = try std.fs.cwd().openFile("data/wmb/wmb6/prefab.wmb", .{});
+//     defer file.close();
 
-    var source = std.io.StreamSource{ .file = file };
+//     var source = std.io.StreamSource{ .file = file };
 
-    var level = try load(std.testing.allocator, &source, .{});
-    defer level.deinit();
+//     var level = try load(std.testing.allocator, &source, .{});
+//     defer level.deinit();
 
-    dumpLevel(.wmb6, level);
-    try writeStl(level, "wmb6-prefab.stl");
-}
+//     dumpLevel(.wmb6, level);
+//     try writeStl(level, "wmb6-prefab.stl");
+// }

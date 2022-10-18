@@ -15,7 +15,6 @@ pgm vec3
 ! f32 y
 ! f32 z
 
-
 print "header"
 str 4 version
 u32 version
@@ -83,10 +82,23 @@ print "group" "skins"
   u32 height 
   str 16 name
 
-  .if 7 7 # extern
+  .if *skin_type 7 # extern
     str *width filename
   .else # not extern
-    
+    .if *skin_type 2 # RGB565
+      bitmap *width *height rgb565
+    .endif
+    .if *skin_type 12 # RGB888 + mips
+      .if *skindex 0
+        bitmap *width *height bgr888 texture.ppm
+      .else
+        bitmap *width *height bgr888 normal.ppm
+      .endif
+      bitmap 256 256 bgr888
+      bitmap 128 128 bgr888
+      bitmap 64 64 bgr888
+    .endif
+
   .endif
 
   # material definition here
@@ -94,6 +106,8 @@ print "group" "skins"
 .endloop
 
 print "group" "uvs"
+tell 
+
 .loop *num_stpts index
   print "group" "skin_uv" *index
 
@@ -105,6 +119,7 @@ print "group" "uvs"
 
 
 print "group" "tris"
+tell
 .loop *numtris index
   print "group" "triangle" *index
 
@@ -123,7 +138,9 @@ print "group" "tris"
 .endloop
 
 
+
 print "group" "vertices"
+tell
 .loop *numverts index
   print "group" "vertex" *index
 
@@ -142,6 +159,7 @@ print "group" "frames"
 .loop *numframes index
   print "group" "frames" *index
 
+  tell 
   str 16 name
   u32 vertices_count
   u32 matrix_count
@@ -181,6 +199,8 @@ print "group" "frames"
 
 .endloop
 
+.def elements 0
+.def weights 0
 
 print "group" "frames"
 .loop *deformers_count index

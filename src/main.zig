@@ -155,6 +155,12 @@ pub fn String(comptime N: comptime_int) type {
             try std.fmt.formatText(str.get(), "S", options, writer);
         }
 
+        pub fn read(reader: anytype) !Str {
+            var str: Str = .{};
+            try reader.readNoEof(str.chars[0..N]);
+            return str;
+        }
+
         comptime {
             std.debug.assert(@sizeOf(@This()) == N);
         }
@@ -179,8 +185,11 @@ pub const TextureFormat = enum {
     /// Memory order is blue, green, red, alpha.
     rgba8888,
 
-    /// DXT compressed textures.
+    /// DXT compressed textures, texture data contains DXT bytes.
     dds,
+
+    /// Texture is stored externally, texture data contains the file name.
+    @"extern",
 
     pub fn bpp(fmt: TextureFormat) usize {
         return switch (fmt) {
@@ -189,7 +198,8 @@ pub const TextureFormat = enum {
             .rgb4444 => 2,
             .rgb888 => 3,
             .rgba8888 => 4,
-            .dds => 0,
+            .dds => 1,
+            .@"extern" => 1,
         };
     }
 };
