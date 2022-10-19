@@ -126,7 +126,6 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 .width = try reader.readIntLittle(u32),
                 .height = try reader.readIntLittle(u32),
                 .format = undefined,
-                .has_mipmaps = undefined,
                 .data = undefined,
             };
 
@@ -139,19 +138,30 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         try reader.readIntLittle(u32),
                     };
 
-                    tex.has_mipmaps = true;
                     tex.format = .rgb565;
+
+                    const data_size: usize = tex.format.bpp() * @as(usize, tex.width) * tex.height;
 
                     // load mip level 0
                     {
                         // base + count + offsets[] + actual_offset
                         try header.textures.seekTo(source, offset + 4 + 4 * texture_offsets.len + mip_offsets[0]);
-                        const data_size: usize = tex.format.bpp() * @as(usize, tex.width) * tex.height;
                         tex.data = try arena.alloc(u8, data_size);
                         try reader.readNoEof(tex.data);
                     }
 
-                    // TODO: Load rest of mip maps
+                    // Load rest of mip maps
+                    {
+                        tex.mip_levels = [3][]u8{
+                            try arena.alloc(u8, data_size / (2 * 2)),
+                            try arena.alloc(u8, data_size / (4 * 4)),
+                            try arena.alloc(u8, data_size / (8 * 8)),
+                        };
+
+                        for (tex.mip_levels.?) |level| {
+                            try reader.readNoEof(level);
+                        }
+                    }
                 },
                 .WMB7 => {
                     const tex_type_tag = try reader.readIntLittle(u32);
@@ -167,7 +177,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         std.log.warn("unhandled flag in texture type code: 0x{X:0>4}", .{tex_type_tag});
                     }
 
-                    tex.has_mipmaps = tex_type.has_mipmaps;
+                    const has_mipmaps = tex_type.has_mipmaps;
 
                     tex.format = switch (tex_type.type) {
                         0 => lib.TextureFormat.pal256,
@@ -199,8 +209,16 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                     try reader.readNoEof(tex.data);
 
-                    if (tex.has_mipmaps) {
-                        logger.warn("texture {s} has mipmaps, but we cannot load these yet.", .{tex.name.get()});
+                    if (has_mipmaps) {
+                        tex.mip_levels = [3][]u8{
+                            try arena.alloc(u8, data_size / (2 * 2)),
+                            try arena.alloc(u8, data_size / (4 * 4)),
+                            try arena.alloc(u8, data_size / (8 * 8)),
+                        };
+
+                        for (tex.mip_levels.?) |level| {
+                            try reader.readNoEof(level);
+                        }
                     }
                 },
             }
@@ -209,13 +227,15 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
     if (header.pvs.present()) {
         try header.pvs.seekTo(source, 0);
-        logger.warn("loading of pvs not supported yet.", .{});
+        // we're currently not interested in this data
+        // logger.warn("loading of pvs not supported yet.", .{});
     }
 
     // BSP only
     if (header.bsp_nodes.present()) {
         try header.bsp_nodes.seekTo(source, 0);
-        logger.warn("loading of bsp_nodes not supported yet.", .{});
+        // we're currently not interested in this data
+        // logger.warn("loading of bsp_nodes not supported yet.", .{});
     }
 
     if (header.materials.present()) {
@@ -268,13 +288,15 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     // BSP only
     if (header.bsp_leafs.present()) {
         try header.bsp_leafs.seekTo(source, 0);
-        logger.warn("loading of bsp_leafs not supported yet.", .{});
+        // We're currently not interested in this data yet
+        // logger.warn("loading of bsp_leafs not supported yet.", .{});
     }
 
     // BSP only
     if (header.bsp_blocks.present()) {
         try header.bsp_blocks.seekTo(source, 0);
-        logger.warn("loading of bsp_blocks not supported yet.", .{});
+        // We're currently not interested in this data yet
+        // logger.warn("loading of bsp_blocks not supported yet.", .{});
     }
 
     if (header.objects.present()) {
@@ -1142,9 +1164,10 @@ pub const Texture = struct {
     width: u32,
     height: u32,
     format: lib.TextureFormat,
-    has_mipmaps: bool,
 
     data: []u8,
+
+    mip_levels: ?[3][]u8 = null,
 };
 
 pub const Skin = struct {
