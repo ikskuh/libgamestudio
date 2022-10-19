@@ -44,7 +44,7 @@ pub const CoordinateSystem = enum {
             .gamestudio => ang,
             .opengl => Euler{
                 .pan = ang.pan,
-                .tilt = ang.tilt,
+                .tilt = -ang.tilt,
                 .roll = -ang.roll,
             },
         };

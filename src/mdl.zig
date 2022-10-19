@@ -287,7 +287,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                 {
                     try vertices.resize(num_verts);
                     for (vertices.items) |*vert| {
-                        vert.* = try decodeVertex(reader, header.md7_mainvertex_stc_size);
+                        vert.* = try decodeVertex(options, reader, header.md7_mainvertex_stc_size);
                     }
                 }
 
@@ -312,7 +312,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                         if (vertex_count > 0) {
                             frame.vertices = try arena.alloc(Vertex, vertex_count);
                             for (frame.vertices) |*vert| {
-                                vert.* = try decodeVertex(reader, header.md7_framevertex_stc_size);
+                                vert.* = try decodeVertex(options, reader, header.md7_framevertex_stc_size);
                             }
                         }
                         if (matrix_count > 0) {
@@ -400,7 +400,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     };
 }
 
-fn decodeVertex(reader: anytype, vertex_size: usize) !Vertex {
+fn decodeVertex(options: LoadOptions, reader: anytype, vertex_size: usize) !Vertex {
     var vtx = switch (vertex_size) {
         16 => blk: {
             var v = Vertex{
@@ -426,7 +426,12 @@ fn decodeVertex(reader: anytype, vertex_size: usize) !Vertex {
         },
     };
     if (vtx.bone != null and vtx.bone.? == std.math.maxInt(u16)) vtx.bone = null;
-    return vtx;
+
+    return Vertex{
+        .position = options.transformVec(vtx.position),
+        .normal = options.transformNormal(vtx.normal),
+        .bone = vtx.bone,
+    };
 }
 
 fn decodeSkin(version: Version, arena: std.mem.Allocator, default_width: u32, default_height: u32, reader: anytype) !Skin {
