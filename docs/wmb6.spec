@@ -1,6 +1,6 @@
-print .=============.
-print |file header|
-print '============='
+
+print file header for *file.name
+
 str 4 magic 
 u32 palettes.off
 u32 palettes.len
@@ -48,7 +48,32 @@ tell
 print
 print texture list
 seek *textures.off
+
 u32 texture.count
+
+u32 texture[0].off
+u32 texture[1].off
+
+print texture0
+seek *textures.off *texture[0].off
+str 16 name
+u32 width
+u32 height
+u32 type
+u32 legacy[0]
+u32 legacy[1]
+u32 legacy[2]
+
+print texture1
+seek *textures.off *texture[1].off
+str 16 name
+u32 width
+u32 height
+u32 type
+u32 legacy[0]
+u32 legacy[1]
+u32 legacy[2]
+
 
 print
 print object list
@@ -83,15 +108,15 @@ print materials *materials.len = 4
 
 pgm mtl
 ! print - material *arg[0]
-! f32 mat[0][0] # scale_x?
-! f32 mat[1][0] # 1/x_scale
-! f32 mat[2][0] # pos_x?
-! f32 mat[0][1] # x_offset
-! f32 mat[1][1] # angle?
-! f32 mat[2][1] # ???
-! f32 mat[0][2] # 1/y_scale
-! f32 mat[1][2] # y_offset
-! f32 mat[2][2]
+! f32 vec_s.x
+! f32 vec_s.y
+! f32 vec_s.z
+! f32 dist_s
+! f32 vec_t.x
+! f32 vec_t.y
+! f32 vec_t.z
+! f32 dist_t
+! u32 texture_index
 ! u16 flags # 0=shaded, 3=flat, 5=sky, 9=turbulence, 11=none, 16=detail, 64=passable, 16384=smooth
 ! u32 user_flags # 1=flag1, 2=flag2, 4=flag3, 8=flag4, 16=flag5, 32=flag6, 64=flag7, 128=flag8
 ! u8 ambient    # 0 ... 100
@@ -113,14 +138,14 @@ seek *aabb_hulls.off
 dump *aabb_hulls.len
 
 seek *aabb_hulls.off
-.loop 36
-
-u32 index
-u32 # always zero
-i32 a
-i32 b
-
-.endloop
+# .loop 36
+# 
+# u32 index
+# u32 # always zero
+# i32 a
+# i32 b
+# 
+# .endloop
 
 print 
 print wmb6_planes *wmb6_planes.len
@@ -314,6 +339,7 @@ print
 print bsp_leafs
 seek *bsp_leafs.off
 dump *bsp_leafs.len
+seek *bsp_leafs.off
 
 .loop 1 leaf
   print leaf *leaf
@@ -362,3 +388,18 @@ seek 0
 
 
 
+seek *palettes.off
+# dump *palettes.len
+
+move 16
+
+.loop 256 index
+  print *index
+  u8 r
+  u8 g
+  u8 b
+.endloop
+
+# diskdump *palettes.len palettes.bin
+
+# bitmap 128 128 rgb888 pal.ppm

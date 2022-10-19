@@ -37,7 +37,7 @@ pub const LoadOptions = struct {
     }
 };
 
-pub const LoadError = error{ VersionMismatch, InvalidTexture, InvalidObject, InvalidLightmapSize, InvalidFace, EndOfStream, OutOfMemory };
+pub const LoadError = error{ VersionMismatch, InvalidSkin, InvalidMaterial, InvalidTexture, InvalidObject, InvalidLightmapSize, InvalidFace, EndOfStream, OutOfMemory };
 
 pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options: LoadOptions) (std.io.StreamSource.ReadError || std.io.StreamSource.SeekError || LoadError)!Level {
     comptime {
@@ -72,6 +72,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     defer terrain_light_maps.deinit();
 
     var level_info: ?LevelInfo = null;
+    var palette: ?Palette = null;
 
     var header = try reader.readStruct(bits.WMB_HEADER);
 
@@ -83,10 +84,24 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
     };
 
     // WMB1..6 only
-    // if (header.palettes.present()) {
-    //     try header.palettes.seekTo(source, 0);
-    //     logger.warn("loading of palettes not supported yet.", .{});
-    // }
+    if (header.palettes.present()) {
+        try header.palettes.seekTo(source, 0);
+
+        try source.seekBy(16); // palette info
+        var pal: Palette = undefined;
+        for (pal) |*c| {
+            const b = try reader.readIntLittle(u8);
+            const g = try reader.readIntLittle(u8);
+            const r = try reader.readIntLittle(u8);
+            c.* = Color{
+                .r = @intToFloat(f32, r) / 255.0,
+                .g = @intToFloat(f32, g) / 255.0,
+                .b = @intToFloat(f32, b) / 255.0,
+            };
+        }
+
+        palette = pal;
+    }
 
     if (header.textures.present()) {
         try header.textures.seekTo(source, 0);
@@ -106,64 +121,88 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
             try header.textures.seekTo(source, offset);
 
             const tex = try textures.addOne();
-            tex.* = .{
-                .name = undefined,
-                .width = undefined,
-                .height = undefined,
+            tex.* = Texture{
+                .name = try String(16).read(reader),
+                .width = try reader.readIntLittle(u32),
+                .height = try reader.readIntLittle(u32),
                 .format = undefined,
                 .has_mipmaps = undefined,
                 .data = undefined,
             };
 
-            try reader.readNoEof(tex.name.chars[0..16]);
-            tex.width = try reader.readIntLittle(u32);
-            tex.height = try reader.readIntLittle(u32);
+            switch (version) {
+                .WMB6 => {
+                    const mip_offsets = [4]u32{
+                        try reader.readIntLittle(u32),
+                        try reader.readIntLittle(u32),
+                        try reader.readIntLittle(u32),
+                        try reader.readIntLittle(u32),
+                    };
 
-            const tex_type_tag = try reader.readIntLittle(u32);
+                    tex.has_mipmaps = true;
+                    tex.format = .rgb565;
 
-            const TexType = packed struct {
-                type: u3,
-                has_mipmaps: bool,
-                unknown1: u12,
-                unknown2: u16,
-            };
+                    // load mip level 0
+                    {
+                        // base + count + offsets[] + actual_offset
+                        try header.textures.seekTo(source, offset + 4 + 4 * texture_offsets.len + mip_offsets[0]);
+                        const data_size: usize = tex.format.bpp() * @as(usize, tex.width) * tex.height;
+                        tex.data = try arena.alloc(u8, data_size);
+                        try reader.readNoEof(tex.data);
+                    }
 
-            const tex_type = @bitCast(TexType, tex_type_tag);
-
-            tex.has_mipmaps = tex_type.has_mipmaps;
-
-            tex.format = switch (tex_type.type) {
-                0 => lib.TextureFormat.pal256,
-                2 => lib.TextureFormat.rgb565,
-                4 => lib.TextureFormat.rgb888,
-                5 => lib.TextureFormat.rgba8888,
-                6 => lib.TextureFormat.dds,
-                else => {
-                    logger.err("Invalid texture format: {d}", .{tex_type.type});
-                    return error.InvalidTexture;
+                    // TODO: Load rest of mip maps
                 },
-            };
+                .WMB7 => {
+                    const tex_type_tag = try reader.readIntLittle(u32);
+                    const TexType = packed struct {
+                        type: u3,
+                        has_mipmaps: bool,
+                        unknown1: u12,
+                        unknown2: u16,
+                    };
 
-            _ = try reader.readIntLittle(u32);
-            _ = try reader.readIntLittle(u32);
-            _ = try reader.readIntLittle(u32);
+                    const tex_type = @bitCast(TexType, tex_type_tag);
+                    if (tex_type.unknown1 != 0 or tex_type.unknown2 != 0) {
+                        std.log.warn("unhandled flag in texture type code: 0x{X:0>4}", .{tex_type_tag});
+                    }
 
-            const data_size: usize = switch (tex.format) {
-                .rgba8888 => 4 * @as(usize, tex.width) * tex.height,
-                .rgb888 => 3 * @as(usize, tex.width) * tex.height,
-                .rgb565 => 2 * @as(usize, tex.width) * tex.height,
-                .dds => tex.width,
-                .pal256 => @as(usize, tex.width) * tex.height,
-                .@"extern" => unreachable,
-                .rgb4444 => unreachable,
-            };
+                    tex.has_mipmaps = tex_type.has_mipmaps;
 
-            tex.data = try arena.alloc(u8, data_size);
+                    tex.format = switch (tex_type.type) {
+                        0 => lib.TextureFormat.pal256,
+                        2 => lib.TextureFormat.rgb565,
+                        4 => lib.TextureFormat.rgb888,
+                        5 => lib.TextureFormat.rgba8888,
+                        6 => lib.TextureFormat.dds,
+                        else => {
+                            logger.err("Invalid texture format: {d}", .{tex_type.type});
+                            return error.InvalidTexture;
+                        },
+                    };
 
-            try reader.readNoEof(tex.data);
+                    _ = try reader.readIntLittle(u32);
+                    _ = try reader.readIntLittle(u32);
+                    _ = try reader.readIntLittle(u32);
 
-            if (tex.has_mipmaps) {
-                logger.warn("texture {s} has mipmaps, but we cannot load these yet.", .{tex.name.get()});
+                    const data_size: usize = switch (tex.format) {
+                        .rgba8888 => 4 * @as(usize, tex.width) * tex.height,
+                        .rgb888 => 3 * @as(usize, tex.width) * tex.height,
+                        .rgb565 => 2 * @as(usize, tex.width) * tex.height,
+                        .dds => tex.width,
+                        .pal256 => @as(usize, tex.width) * tex.height,
+                        .@"extern" => unreachable,
+                        .rgb4444 => unreachable,
+                    };
+
+                    tex.data = try arena.alloc(u8, data_size);
+
+                    try reader.readNoEof(tex.data);
+
+                    if (tex.has_mipmaps) {
+                        logger.warn("texture {s} has mipmaps, but we cannot load these yet.", .{tex.name.get()});
+                    }
+                },
             }
         }
     }
@@ -195,8 +234,27 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
         // } MATERIAL_INFO;
 
         for (materials.items) |*mtl| {
-            var dummy: [44]u8 = undefined;
-            try reader.readNoEof(&dummy);
+            mtl.* = Material{
+                .vec_s = options.transformVec(try util.readVec3(reader)),
+                .offset_s = try util.readFloat(reader),
+                .vec_t = options.transformVec(try util.readVec3(reader)),
+                .offset_t = try util.readFloat(reader),
+                .texture_index = try reader.readIntLittle(u32),
+                .flags = undefined,
+                .type = undefined,
+                .ambient = 0,
+                .albedo = 0,
+            };
+
+            const base_flags = try reader.readIntLittle(u16);
+            const user_flags = try reader.readIntLittle(u32);
+
+            mtl.type = std.meta.intToEnum(SurfaceType, @truncate(u4, base_flags)) catch return error.InvalidMaterial;
+            mtl.flags = SurfaceFlags.fromInt(base_flags, user_flags);
+
+            mtl.ambient = @intToFloat(f32, try reader.readIntLittle(u8));
+            mtl.albedo = @intToFloat(f32, try reader.readIntLittle(u8));
+
             try reader.readNoEof(mtl.name.chars[0..20]);
         }
     }
@@ -658,22 +716,11 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     .ambient = try util.readFloat(reader),
                     .albedo = try util.readFloat(reader),
                     .flags = undefined,
+                    .type = undefined,
                 };
                 const flags = try reader.readIntLittle(u32);
-                skin.flags = Skin.Flags{
-                    .flat = (flags & (1 << 1)) != 0,
-                    .sky = (flags & (1 << 2)) != 0,
-                    .passable = (flags & (1 << 6)) != 0,
-                    .smooth = (flags & (1 << 14)) != 0,
-                    .flag1 = (flags & (1 << 16)) != 0,
-                    .flag2 = (flags & (1 << 17)) != 0,
-                    .flag3 = (flags & (1 << 18)) != 0,
-                    .flag4 = (flags & (1 << 19)) != 0,
-                    .flag5 = (flags & (1 << 20)) != 0,
-                    .flag6 = (flags & (1 << 21)) != 0,
-                    .flag7 = (flags & (1 << 22)) != 0,
-                    .flag8 = (flags & (1 << 23)) != 0,
-                };
+                skin.flags = SurfaceFlags.fromInt(flags, flags >> 16);
+                skin.type = std.meta.intToEnum(SurfaceType, @truncate(u4, flags)) catch return error.InvalidSkin;
             }
         }
     }
@@ -751,6 +798,8 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     .texture_coord = Vector2{ .x = 0, .y = 0 },
                     .lightmap_coord = Vector2{ .x = 0, .y = 0 },
                 };
+                vtx.texture_coord.x = (1.0 / 64.0) * vtx.position.x;
+                vtx.texture_coord.y = (1.0 / 64.0) * vtx.position.y;
             }
         }
 
@@ -795,7 +844,6 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
                 _ = plane_id;
                 _ = side;
-                _ = tex_info;
                 _ = typelight;
                 _ = baselight;
                 _ = light0;
@@ -831,36 +879,29 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                             @intCast(u16, tris_edges[j - 1][0]),
                             @intCast(u16, tris_edges[j - 0][0]),
                         },
-                        .skin = 0,
+                        .skin = tex_info,
                     });
                 }
             }
         }
 
-        var skins = try arena.alloc(Skin, 1);
-        errdefer arena.free(skins);
+        var skins = std.ArrayList(Skin).init(arena);
+        errdefer skins.deinit();
 
-        skins[0] = Skin{
-            .texture = 0,
-            .lightmap = 0,
-            .material = 0,
-            .ambient = 50,
-            .albedo = 0,
-            .flags = .{
-                .flat = false,
-                .sky = false,
-                .passable = false,
-                .smooth = false,
-                .flag1 = false,
-                .flag2 = false,
-                .flag3 = false,
-                .flag4 = false,
-                .flag5 = false,
-                .flag6 = false,
-                .flag7 = false,
-                .flag8 = false,
-            },
-        };
+        try skins.resize(materials.items.len);
+
+        for (skins.items) |*skin, skindex| {
+            const mtl = materials.items[skindex];
+            skin.* = Skin{
+                .texture = @intCast(u16, mtl.texture_index),
+                .lightmap = 0, // TODO: Correlate with lightmap
+                .material = @intCast(u32, skindex),
+                .ambient = mtl.ambient,
+                .albedo = mtl.albedo,
+                .flags = mtl.flags,
+                .type = mtl.type,
+            };
+        }
 
         var wmb6_block = Block{
             .bb_min = Vector3.fromArray(.{ 0, 0, 0 }),
@@ -868,7 +909,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
             .vertices = vertices.toOwnedSlice(),
             .triangles = triangles.toOwnedSlice(),
-            .skins = skins,
+            .skins = skins.toOwnedSlice(),
         };
 
         try blocks.append(wmb6_block);
@@ -879,6 +920,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
 
         .file_version = version,
         .info = level_info,
+        .palette = palette,
 
         .textures = textures.toOwnedSlice(),
         .materials = materials.toOwnedSlice(),
@@ -903,6 +945,7 @@ pub const Level = struct {
 
     file_version: Version,
     info: ?LevelInfo,
+    palette: ?Palette,
 
     textures: []Texture,
     materials: []Material,
@@ -1094,30 +1137,6 @@ pub const Triangle = struct {
     skin: u16,
 };
 
-pub const Skin = struct {
-    texture: u16, // index into the textures list
-    lightmap: u16, // index into the lightmaps list
-    material: u32, // index into the MATERIAL_INFO array
-    ambient: f32,
-    albedo: f32,
-    flags: Flags,
-
-    pub const Flags = struct {
-        flat: bool,
-        sky: bool,
-        passable: bool,
-        smooth: bool,
-        flag1: bool,
-        flag2: bool,
-        flag3: bool,
-        flag4: bool,
-        flag5: bool,
-        flag6: bool,
-        flag7: bool,
-        flag8: bool,
-    };
-};
-
 pub const Texture = struct {
     name: String(16) = .{},
     width: u32,
@@ -1128,8 +1147,72 @@ pub const Texture = struct {
     data: []u8,
 };
 
+pub const Skin = struct {
+    texture: u16, // index into the textures list
+    lightmap: u16, // index into the lightmaps list
+    material: u32, // index into the MATERIAL_INFO array
+    ambient: f32,
+    albedo: f32,
+    flags: SurfaceFlags,
+    type: SurfaceType,
+};
+
 pub const Material = struct {
+    vec_s: Vector3,
+    offset_s: f32,
+
+    vec_t: Vector3,
+    offset_t: f32,
+
+    texture_index: u32,
+
+    flags: SurfaceFlags,
+    type: SurfaceType,
+
+    ambient: f32,
+    albedo: f32,
+
     name: String(20) = .{},
+};
+
+pub const SurfaceType = enum(u4) {
+    shaded = 0,
+    flat = 3,
+    sky = 5,
+    turbulence = 9,
+    none = 11,
+};
+
+pub const SurfaceFlags = struct {
+    detail: bool,
+    passable: bool,
+    smooth: bool,
+
+    flag1: bool,
+    flag2: bool,
+    flag3: bool,
+    flag4: bool,
+    flag5: bool,
+    flag6: bool,
+    flag7: bool,
+    flag8: bool,
+
+    pub fn fromInt(generic: u32, user: u32) SurfaceFlags {
+        return SurfaceFlags{
+            .detail = (generic & (1 << 4)) != 0,
+            .passable = (generic & (1 << 6)) != 0,
+            .smooth = (generic & (1 << 14)) != 0,
+
+            .flag1 = (user & (1 << 0)) != 0,
+            .flag2 = (user & (1 << 1)) != 0,
+            .flag3 = (user & (1 << 2)) != 0,
+            .flag4 = (user & (1 << 3)) != 0,
+            .flag5 = (user & (1 << 4)) != 0,
+            .flag6 = (user & (1 << 5)) != 0,
+            .flag7 = (user & (1 << 6)) != 0,
+            .flag8 = (user & (1 << 7)) != 0,
+        };
+    }
 };
 
 pub const LevelInfo = struct {
@@ -1148,6 +1231,8 @@ pub const LightMapSize = enum(u32) {
     @"1024x1024" = 2,
 };
 
+pub const Palette = [256]Color;
+
 const bits = struct {
     const LIST = extern struct {
         offset: u32, // offset of the list from the start of the WMB file, in bytes
@@ -1157,7 +1242,7 @@ const bits = struct {
             return (list.length > 0);
         }
 
-        pub fn seekTo(list: LIST, source: *std.io.StreamSource, offset: u32) !void {
+        pub fn seekTo(list: LIST, source: *std.io.StreamSource, offset: u64) !void {
             try source.seekTo(@as(u64, list.offset) + offset);
         }
 
