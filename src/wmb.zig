@@ -396,7 +396,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     entity.flags = Entity.Flags.fromOldFlagInt(flags);
 
                     // if (std.mem.startsWith(u8, ent.file_name.get(), "floor")) {
-                    std.debug.print("old {s} {s} => {} {?}\n", .{ entity.file_name.get(), entity.name.get(), flags, if (flags != 0) entity.flags else null });
+                    // std.debug.print("old {s} {s} => {} {?}\n", .{ entity.file_name.get(), entity.name.get(), flags, if (flags != 0) entity.flags else null });
                     // }
 
                     break :blk .{ .entity = entity };
@@ -600,7 +600,7 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     entity.flags = Entity.Flags.fromNewFlagInt(flags);
 
                     // if (std.mem.startsWith(u8, entity.file_name.get(), "floor")) {
-                    std.debug.print("new {s} {s} => {} {?}\n", .{ entity.file_name.get(), entity.name.get(), flags, if (flags != 0) entity.flags else null });
+                    // std.debug.print("new {s} {s} => {} {?}\n", .{ entity.file_name.get(), entity.name.get(), flags, if (flags != 0) entity.flags else null });
                     // }
 
                     entity.ambient = try util.readFloat(reader);
