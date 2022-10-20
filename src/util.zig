@@ -31,3 +31,31 @@ pub fn writeVec3(writer: anytype, vec: Vector3) !void {
     try writer.writeIntLittle(u32, @bitCast(u32, vec.y));
     try writer.writeIntLittle(u32, @bitCast(u32, vec.z));
 }
+
+pub fn FlagFormatter(comptime T: type) type {
+    return struct {
+        pub fn format(value: T, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
+            try writer.writeAll("{");
+
+            var had_one = false;
+            inline for (@typeInfo(T).Struct.fields) |fld| {
+                if (@field(value, fld.name)) {
+                    if (had_one) {
+                        try writer.writeAll(", ");
+                    } else {
+                        try writer.writeAll(" ");
+                    }
+                    had_one = true;
+                    try writer.writeAll(fld.name);
+                }
+            }
+            if (had_one) {
+                try writer.writeAll(" }");
+            } else {
+                try writer.writeAll("}");
+            }
+        }
+    };
+}

@@ -373,29 +373,33 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     //   char  filename[13];
                     //   char  action[20];
                     //   float skill[8];
+                    //   float ambient; // SWAPPED IN THE MANUAL!
                     //   long  flags;
-                    //   float ambient;
                     // } WMB_OLD_ENTITY;
 
-                    var ent = Entity{
+                    var entity = Entity{
                         .is_old_data = true,
                         .origin = options.transformVec(try util.readVec3(reader)),
                         .angle = options.transformAng(try util.readEuler(reader)),
                         .scale = options.transformScale(try util.readVec3(reader)),
                     };
 
-                    try reader.readNoEof(ent.name.chars[0..20]); // smaller than the actual one!
-                    try reader.readNoEof(ent.file_name.chars[0..13]); // Hello, DOS! Long time no see!
-                    try reader.readNoEof(ent.action.chars[0..20]);
+                    try reader.readNoEof(entity.name.chars[0..20]); // smaller than the actual one!
+                    try reader.readNoEof(entity.file_name.chars[0..13]); // Hello, DOS! Long time no see!
+                    try reader.readNoEof(entity.action.chars[0..20]);
 
-                    try reader.readNoEof(std.mem.sliceAsBytes(ent.skills[0..8]));
+                    try reader.readNoEof(std.mem.sliceAsBytes(entity.skills[0..8]));
+
+                    entity.ambient = try util.readFloat(reader);
 
                     const flags = try reader.readIntLittle(u32);
-                    ent.flags = Entity.Flags.fromInt(flags);
+                    entity.flags = Entity.Flags.fromOldFlagInt(flags);
 
-                    ent.ambient = try util.readFloat(reader);
+                    // if (std.mem.startsWith(u8, ent.file_name.get(), "floor")) {
+                    std.debug.print("old {s} {s} => {} {?}\n", .{ entity.file_name.get(), entity.name.get(), flags, if (flags != 0) entity.flags else null });
+                    // }
 
-                    break :blk .{ .entity = ent };
+                    break :blk .{ .entity = entity };
                 },
                 4 => blk: {
                     // typedef struct {
@@ -593,7 +597,11 @@ pub fn load(allocator: std.mem.Allocator, source: *std.io.StreamSource, options:
                     try reader.readNoEof(std.mem.sliceAsBytes(entity.skills[0..20]));
 
                     const flags = try reader.readIntLittle(u32);
-                    entity.flags = Entity.Flags.fromInt(flags);
+                    entity.flags = Entity.Flags.fromNewFlagInt(flags);
+
+                    // if (std.mem.startsWith(u8, entity.file_name.get(), "floor")) {
+                    std.debug.print("new {s} {s} => {} {?}\n", .{ entity.file_name.get(), entity.name.get(), flags, if (flags != 0) entity.flags else null });
+                    // }
 
                     entity.ambient = try util.readFloat(reader);
                     entity.albedo = try util.readFloat(reader);
@@ -1021,6 +1029,8 @@ pub const Light = struct {
     range: f32,
     flags: Flags,
     pub const Flags = struct {
+        pub const format = util.FlagFormatter(@This()).format;
+
         highres: bool, // 0
         dynamic: bool, // 1
         static: bool, // 2
@@ -1034,7 +1044,9 @@ pub const Sound = struct {
     range: u32,
     flags: Flags,
     file_name: String(33),
-    pub const Flags = struct {};
+    pub const Flags = struct {
+        pub const format = util.FlagFormatter(@This()).format;
+    };
 };
 
 pub const Path = struct {
@@ -1067,7 +1079,7 @@ pub const Entity = struct {
     file_name: String(33) = .{},
     action: String(33) = .{},
     skills: [20]f32 = std.mem.zeroes([20]f32),
-    flags: Flags = Flags.fromInt(0),
+    flags: Flags = std.mem.zeroes(Flags),
     ambient: f32 = 0,
     albedo: f32 = 50.0,
     path: ?u32 = null,
@@ -1077,6 +1089,8 @@ pub const Entity = struct {
     string2: String(33) = .{},
 
     pub const Flags = struct {
+        pub const format = util.FlagFormatter(@This()).format;
+
         flag1: bool, // 0,
         flag2: bool, // 1,
         flag3: bool, // 2,
@@ -1091,6 +1105,7 @@ pub const Entity = struct {
         overlay: bool, // 12, // for models and panels
         spotlight: bool, // 13,
         znear: bool, // 14,
+        flare: bool, // ???
         nofilter: bool, // 16, // point filtering
         unlit: bool, // 17,	// no light from environment
         shadow: bool, // 18,	// cast dynamic shadows
@@ -1100,9 +1115,43 @@ pub const Entity = struct {
         decal: bool, // 22,	// sprite without backside
         metal: bool, // 22,	// use metal material
         cast: bool, // 23,	// don't receive shadows
+        local: bool, //
+        bbox: bool, // ???
         polygon: bool, // 26,	// polygonal collision detection
 
-        pub fn fromInt(val: u32) Flags {
+        pub fn fromOldFlagInt(val: u32) Flags {
+            return Flags{
+                .flag1 = false, // unavailable
+                .flag2 = false, // unavailable
+                .flag3 = false, // unavailable
+                .flag4 = false, // unavailable
+                .flag5 = false, // unavailable
+                .flag6 = false, // unavailable
+                .flag7 = false, // unavailable
+                .flag8 = false, // unavailable
+                .invisible = (val & 1) != 0, // old
+                .passable = (val & 2) != 0, // old
+                .translucent = (val & 4) != 0, // old
+                .overlay = (val & 16) != 0, // old
+                .spotlight = false, // unavailable
+                .znear = false, // unavailable
+                .flare = (val & 128) != 0, // old
+                .nofilter = (val & 256) != 0, // old
+                .unlit = (val & 512) != 0, // old
+                .shadow = (val & 1024) != 0, // old
+                .light = false, // unavailable
+                .nofog = (val & 4096) != 0, // old
+                .bright = (val & 8192) != 0, // old
+                .decal = false, // unavailable
+                .metal = (val & 16384) != 0, // old
+                .cast = (val & 32768) != 0, // old
+                .local = (val & 131072) != 0, // old
+                .bbox = (val & 2097152) != 0, // old
+                .polygon = (val & 262144) != 0, // old
+            };
+        }
+
+        pub fn fromNewFlagInt(val: u32) Flags {
             return Flags{
                 .flag1 = (val & (1 << 0)) != 0,
                 .flag2 = (val & (1 << 1)) != 0,
@@ -1118,6 +1167,7 @@ pub const Entity = struct {
                 .overlay = (val & (1 << 12)) != 0,
                 .spotlight = (val & (1 << 13)) != 0,
                 .znear = (val & (1 << 14)) != 0,
+                .flare = false, // unavailable
                 .nofilter = (val & (1 << 16)) != 0,
                 .unlit = (val & (1 << 17)) != 0,
                 .shadow = (val & (1 << 18)) != 0,
@@ -1127,6 +1177,8 @@ pub const Entity = struct {
                 .decal = (val & (1 << 22)) != 0,
                 .metal = (val & (1 << 22)) != 0,
                 .cast = (val & (1 << 23)) != 0,
+                .local = false, // unavailable
+                .bbox = false, // unavailable
                 .polygon = (val & (1 << 26)) != 0,
             };
         }

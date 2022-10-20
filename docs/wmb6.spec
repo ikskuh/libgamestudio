@@ -79,29 +79,54 @@ print
 print object list
 seek *objects.off
 u32 object.count
-u32 object[0].offset
+array u32 object[?].offset *object.count
+
+
+.loop *object.count index
 
 print
-print object[0]
-seek *objects.off *object[0].offset
-u32 object[0].type # info
-f32 origin.x
-f32 origin.y
-f32 origin.z
-f32 azimuth
-f32 elevation
-u32 flags
-f32 compiler-version
-u8 gamma
-u8 lmap_size
-u8 # unused[0]
-u8 # unused[1]
-u32 dwSunColor
-u32 dwAmbientColor
-u32 dwFogColor[0]
-u32 dwFogColor[1]
-u32 dwFogColor[2]
-u32 dwFogColor[3]
+print object[] *index
+select object[].offset object[?].offset *index
+seek *objects.off *object[].offset
+u32 object[].type 
+.if *object[].type 5 # info
+  f32 origin.x
+  f32 origin.y
+  f32 origin.z
+  f32 azimuth
+  f32 elevation
+  u32 flags
+  f32 compiler-version
+  u8 gamma
+  u8 lmap_size
+  u8 # unused[0]
+  u8 # unused[1]
+  u32 dwSunColor
+  u32 dwAmbientColor
+  u32 dwFogColor[0]
+  u32 dwFogColor[1]
+  u32 dwFogColor[2]
+  u32 dwFogColor[3]
+.endif
+.if *object[].type 3 # old entity
+  f32 position.x
+  f32 position.y
+  f32 position.z 
+  f32 pan
+  f32 tilt
+  f32 roll
+  f32 scale.x
+  f32 scale.y
+  f32 scale.z 
+  str 20 name
+  str 13 filename
+  str 20 action
+  array f32 skill[?] 8
+  u32 ambient
+  u32  flags
+.endif
+
+.endloop
 
 print
 print materials *materials.len = 4
