@@ -126,6 +126,40 @@ u32 object[].type
   u32  flags
 .endif
 
+.if *object[].type 6 # path 
+
+.def num_points 0
+.def num_edges 0
+
+str 20 name
+f32 num_points # number of nodes
+array u32 unused[?] 3
+u32 num_edges
+
+.loop *num_points point 
+print point: *point
+  f32 x
+  f32 y
+  f32 z
+.endloop
+
+.loop *num_points point 
+  # print point: *point
+  # array f32 skill[?] 6
+  move 24 # skip
+.endloop
+
+.loop *num_edges edge
+print edge: *edge
+  array f32 node[?] 2
+  f32 length
+  f32 bezier
+  f32 weight
+  f32 skill
+.endloop
+
+.endif
+
 .endloop
 
 print
